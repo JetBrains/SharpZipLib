@@ -3384,23 +3384,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="EndOfStreamException">
 		/// The stream ends prematurely
 		/// </exception>
-		private ushort ReadLEUshort()
+		unsafe ushort ReadLEUshort()
 		{
-			int data1 = baseStream_.ReadByte();
-
-			if (data1 < 0)
-			{
-				throw new EndOfStreamException("End of stream");
-			}
-
-			int data2 = baseStream_.ReadByte();
-
-			if (data2 < 0)
-			{
-				throw new EndOfStreamException("End of stream");
-			}
-
-			return unchecked((ushort)((ushort)data1 | (ushort)(data2 << 8)));
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(ushort)) < sizeof(ushort))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(ushort*)pBuffer;
 		}
 
 		/// <summary>
@@ -3413,14 +3403,22 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="System.IO.EndOfStreamException">
 		/// The file ends prematurely
 		/// </exception>
-		private uint ReadLEUint()
+		unsafe uint ReadLEUint()
 		{
-			return (uint)(ReadLEUshort() | (ReadLEUshort() << 16));
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(uint)) < sizeof(uint))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(uint*)pBuffer;
 		}
 
-		private ulong ReadLEUlong()
+		unsafe ulong ReadLEUlong()
 		{
-			return ReadLEUint() | ((ulong)ReadLEUint() << 32);
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(ulong)) < sizeof(ulong))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(ulong*)pBuffer;
 		}
 
 		#endregion Reading
