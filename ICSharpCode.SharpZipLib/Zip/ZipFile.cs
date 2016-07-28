@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using System.Text;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using ICSharpCode.SharpZipLib.Encryption;
 using ICSharpCode.SharpZipLib.Core;
@@ -2886,6 +2887,39 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 		}
 
+		[StructLayout(LayoutKind.Sequential, Pack = 2)]
+		struct CentralDirectoryRecord
+		{
+			public ushort thisDiskNumber;
+			public ushort startCentralDirDisk;
+			public ushort entriesForThisDisk;
+			public ushort entriesForWholeCentralDir;
+			public uint centralDirSize;
+			public uint offsetOfCentralDir;
+			public ushort commentSize;
+		}
+
+		[StructLayout(LayoutKind.Sequential, Pack = 2)]
+		struct EntryRecord
+		{
+			public uint signature;
+			public ushort versionMadeBy;
+			public ushort versionToExtract;
+			public ushort bitFlags;
+			public ushort method;
+			public uint dostime;
+			public uint crc;
+			public uint csize;
+			public uint size;
+			public ushort nameLen;
+			public ushort extraLen;
+			public ushort commentLen;
+			public ushort diskStartNo;
+			public ushort internalAttributes;
+			public uint externalAttributes;
+			public uint offset;
+		}
+
 		/// <summary>
 		/// Search for and read the central directory of a zip file filling the entries array.
 		/// </summary>
@@ -2895,7 +2929,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="ICSharpCode.SharpZipLib.Zip.ZipException">
 		/// The central directory is malformed or cannot be found
 		/// </exception>
-		void ReadEntries()
+		unsafe void ReadEntries()
 		{
 			// Search for the End Of Central Directory.  When a zip comment is
 			// present the directory will start earlier
@@ -2918,13 +2952,19 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 
 			// Read end of central directory record
-			ushort thisDiskNumber = ReadLEUshort();
-			ushort startCentralDirDisk = ReadLEUshort();
-			ulong entriesForThisDisk = ReadLEUshort();
-			ulong entriesForWholeCentralDir = ReadLEUshort();
-			ulong centralDirSize = ReadLEUint();
-			long offsetOfCentralDir = ReadLEUint();
-			uint commentSize = ReadLEUshort();
+			byte[] cachebuffer = GetBuffer();
+			if(baseStream_.Read(cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
+				throw new EndOfStreamException("End of stream.");
+			CentralDirectoryRecord cdr;
+			fixed(byte* pCache = cachebuffer)
+				cdr = *(CentralDirectoryRecord*)pCache;
+			ushort thisDiskNumber = cdr.thisDiskNumber;
+			ushort startCentralDirDisk = cdr.startCentralDirDisk;
+			ulong entriesForThisDisk = cdr.entriesForThisDisk;
+			ulong entriesForWholeCentralDir = cdr.entriesForWholeCentralDir;
+			ulong centralDirSize = cdr.centralDirSize;
+			long offsetOfCentralDir = cdr.offsetOfCentralDir;
+			uint commentSize = cdr.commentSize;
 
 			if (commentSize > 0) {
 				byte[] comment = new byte[commentSize];
@@ -2996,61 +3036,51 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			baseStream_.Seek(offsetOfFirstEntry + offsetOfCentralDir, SeekOrigin.Begin);
 
-			for (ulong i = 0; i < entriesForThisDisk; i++) {
-				if (ReadLEUint() != ZipConstants.CentralHeaderSignature) {
+			for (ulong i = 0; i < entriesForThisDisk; i++) 
+			{
+				if(baseStream_.Read(cachebuffer, 0, sizeof(EntryRecord)) < sizeof(EntryRecord))
+					throw new EndOfStreamException("End of stream.");
+				EntryRecord entryrecord;
+				fixed(byte* pCache = cachebuffer)
+					entryrecord = *(EntryRecord*)pCache;
+
+				if (entryrecord.signature != ZipConstants.CentralHeaderSignature) {
 					throw new ZipException("Wrong Central Directory signature");
 				}
 
-				int versionMadeBy = ReadLEUshort();
-				int versionToExtract = ReadLEUshort();
-				int bitFlags = ReadLEUshort();
-				int method = ReadLEUshort();
-				uint dostime = ReadLEUint();
-				uint crc = ReadLEUint();
-				var csize = (long)ReadLEUint();
-				var size = (long)ReadLEUint();
-				int nameLen = ReadLEUshort();
-				int extraLen = ReadLEUshort();
-				int commentLen = ReadLEUshort();
+				int needtextsbuffer = Math.Max(entryrecord.nameLen, (int)entryrecord.commentLen);
+				byte[] textsbuffer = needtextsbuffer <= cachebuffer.Length ? cachebuffer : new byte[needtextsbuffer];
 
-				int diskStartNo = ReadLEUshort();  // Not currently used
-				int internalAttributes = ReadLEUshort();  // Not currently used
+				StreamUtils.ReadFully(baseStream_, textsbuffer, 0, entryrecord.nameLen);
+				string name = ZipConstants.ConvertToStringExt(entryrecord.bitFlags, textsbuffer, entryrecord.nameLen);
 
-				uint externalAttributes = ReadLEUint();
-				long offset = ReadLEUint();
-
-				byte[] buffer = new byte[Math.Max(nameLen, commentLen)];
-
-				StreamUtils.ReadFully(baseStream_, buffer, 0, nameLen);
-				string name = ZipConstants.ConvertToStringExt(bitFlags, buffer, nameLen);
-
-				var entry = new ZipEntry(name, versionToExtract, versionMadeBy, (CompressionMethod)method);
-				entry.Crc = crc & 0xffffffffL;
-				entry.Size = size & 0xffffffffL;
-				entry.CompressedSize = csize & 0xffffffffL;
-				entry.Flags = bitFlags;
-				entry.DosTime = (uint)dostime;
+				var entry = new ZipEntry(name, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method);
+				entry.Crc = entryrecord.crc & 0xffffffffL;
+				entry.Size = entryrecord.size & 0xffffffffL;
+				entry.CompressedSize = entryrecord.csize & 0xffffffffL;
+				entry.Flags = entryrecord.bitFlags;
+				entry.DosTime = entryrecord.dostime;
 				entry.ZipFileIndex = (long)i;
-				entry.Offset = offset;
-				entry.ExternalFileAttributes = (int)externalAttributes;
+				entry.Offset = entryrecord.offset;
+				entry.ExternalFileAttributes = (int)entryrecord.externalAttributes;
 
-				if ((bitFlags & 8) == 0) {
-					entry.CryptoCheckValue = (byte)(crc >> 24);
+				if ((entryrecord.bitFlags & 8) == 0) {
+					entry.CryptoCheckValue = (byte)(entryrecord.crc >> 24);
 				} else {
-					entry.CryptoCheckValue = (byte)((dostime >> 8) & 0xff);
+					entry.CryptoCheckValue = (byte)((entryrecord.dostime >> 8) & 0xff);
 				}
 
-				if (extraLen > 0) {
-					byte[] extra = new byte[extraLen];
+				if (entryrecord.extraLen > 0) {
+					byte[] extra = new byte[entryrecord.extraLen];
 					StreamUtils.ReadFully(baseStream_, extra);
 					entry.ExtraData = extra;
 				}
 
 				entry.ProcessExtraData(false);
 
-				if (commentLen > 0) {
-					StreamUtils.ReadFully(baseStream_, buffer, 0, commentLen);
-					entry.Comment = ZipConstants.ConvertToStringExt(bitFlags, buffer, commentLen);
+				if (entryrecord.commentLen > 0) {
+					StreamUtils.ReadFully(baseStream_, textsbuffer, 0, entryrecord.commentLen);
+					entry.Comment = ZipConstants.ConvertToStringExt(entryrecord.bitFlags, textsbuffer, entryrecord.commentLen);
 				}
 
 				entries_[i] = entry;
