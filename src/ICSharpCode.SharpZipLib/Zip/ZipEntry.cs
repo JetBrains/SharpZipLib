@@ -150,7 +150,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// The name passed is null
 		/// </exception>
 		public ZipEntry(string name)
-			: this(name, 0, ZipConstants.VersionMadeBy, CompressionMethod.Deflated)
+			: this(CleanName(name), 0, ZipConstants.VersionMadeBy, CompressionMethod.Deflated, DateTime.Now)
 		{
 		}
 
@@ -170,18 +170,19 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// The name passed is null
 		/// </exception>
 		internal ZipEntry(string name, int versionRequiredToExtract)
-			: this(name, versionRequiredToExtract, ZipConstants.VersionMadeBy,
-			CompressionMethod.Deflated)
+			: this(CleanName(name), versionRequiredToExtract, ZipConstants.VersionMadeBy,
+			CompressionMethod.Deflated, DateTime.Now)
 		{
 		}
 
 		/// <summary>
 		/// Initializes an entry with the given name and made by information
 		/// </summary>
-		/// <param name="name">Name for this entry</param>
+		/// <param name="name">Name for this entry, assumed <see cref="CleanName"/> has been called for it if needed (it's not when initializing from the central directory, so save time).</param>
 		/// <param name="madeByInfo">Version and HostSystem Information</param>
 		/// <param name="versionRequiredToExtract">Minimum required zip feature version required to extract this entry</param>
 		/// <param name="method">Compression method for this entry.</param>
+		/// <param name="datetime">Optional, skipped when reading from central directory so that to assign DosTime directly, and setting this prop would mean converting back and forth.</param>
 		/// <exception cref="ArgumentNullException">
 		/// The name passed is null
 		/// </exception>
@@ -193,7 +194,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// It is not generally useful, use the constructor specifying the name only.
 		/// </remarks>
 		internal ZipEntry(string name, int versionRequiredToExtract, int madeByInfo,
-			CompressionMethod method)
+			CompressionMethod method, DateTime? datetime)
 		{
 			if (name == null)
 			{
@@ -210,7 +211,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 				throw new ArgumentOutOfRangeException(nameof(versionRequiredToExtract));
 			}
 
-			this.DateTime = DateTime.Now;
+			if(datetime.HasValue)
+				DateTime = datetime.Value;
 			this.name = name;
 			this.versionMadeBy = (ushort)madeByInfo;
 			this.versionToExtract = (ushort)versionRequiredToExtract;
