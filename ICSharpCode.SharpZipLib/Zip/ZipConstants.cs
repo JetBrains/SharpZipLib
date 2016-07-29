@@ -427,11 +427,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Given this value, <see cref="Encoding.GetEncoding(int)"/> throws an <see cref="ArgumentException"/>.
 		/// So replace it with some fallback, e.g. 437 which is the default cpcp in a console in a default Windows installation.
 		/// </remarks>
-		static int defaultCodePage =
-			// these values cause ArgumentException in subsequent calls to Encoding::GetEncoding()
-			((Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 1) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 2) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 3) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 42))
-			? 437 // The default OEM encoding in a console in a default Windows installation, as a fallback.
-			: Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage;
+		static Encoding defaultCodePageEncoding = Encoding.GetEncoding
+			(
+				// these values cause ArgumentException in subsequent calls to Encoding::GetEncoding()
+				((Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 1) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 2) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 3) || (Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage == 42))
+				? 437 // The default OEM encoding in a console in a default Windows installation, as a fallback.
+				: Thread.CurrentThread.CurrentCulture.TextInfo.OEMCodePage
+			); // Getting from code page on every call gets noticeable in the profiler, so store the encoding object already
 
 		/// <summary>
 		/// Default encoding used for string conversion.  0 gives the default system OEM code page.
@@ -442,7 +444,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public static int DefaultCodePage {
 			get {
-				return defaultCodePage;
+				return defaultCodePageEncoding.CodePage;
 			}
 			set {
 				if ((value < 0) || (value > 65535) ||
@@ -450,7 +452,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 					throw new ArgumentOutOfRangeException(nameof(value));
 				}
 
-				defaultCodePage = value;
+				defaultCodePageEncoding = Encoding.GetEncoding(value);
 			}
 		}
 
@@ -472,7 +474,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				return string.Empty;
 			}
 
-			return Encoding.GetEncoding(DefaultCodePage).GetString(data, 0, count);
+			return defaultCodePageEncoding.GetString(data, 0, count);
 		}
 
 		/// <summary>
@@ -552,7 +554,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				return new byte[0];
 			}
 
-			return Encoding.GetEncoding(DefaultCodePage).GetBytes(str);
+			return defaultCodePageEncoding.GetBytes(str);
 		}
 
 		/// <summary>
