@@ -1170,11 +1170,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public INameTransform NameTransform {
 			get {
-				return updateEntryFactory_.NameTransform;
+				return EntryFactory.NameTransform;
 			}
 
 			set {
-				updateEntryFactory_.NameTransform = value;
+				EntryFactory.NameTransform = value;
 			}
 		}
 
@@ -1184,15 +1184,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public IEntryFactory EntryFactory {
 			get {
-				return updateEntryFactory_;
+				return updateEntryFactory_ ?? (updateEntryFactory_ = new ZipEntryFactory());
 			}
 
 			set {
-				if (value == null) {
-					updateEntryFactory_ = new ZipEntryFactory();
-				} else {
-					updateEntryFactory_ = value;
-				}
+				updateEntryFactory_ = value;
 			}
 		}
 
@@ -3225,7 +3221,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		byte[] copyBuffer_;
 		ZipString newComment_;
 		bool commentEdited_;
-		IEntryFactory updateEntryFactory_ = new ZipEntryFactory();
+		IEntryFactory updateEntryFactory_; // Lazy-initialized when accessed via prop, NULL until needed
 		#endregion
 		#endregion
 
