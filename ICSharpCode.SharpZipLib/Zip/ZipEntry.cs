@@ -623,7 +623,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </remarks>
 		public DateTime DateTime
 		{
-			get { return dateTime; }
+			get { return (dateTime ?? (dateTime = GetDateTime(new ZipExtraData(extra)))).Value; }
 
 			set {
 				var year = (uint)value.Year;
@@ -932,7 +932,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				}
 			}
 
-			dateTime = GetDateTime(extraData);
+			// dateTime = GetDateTime(extraData); Commented out, because extra data would be delay-extracted now on demand
 			if (method == CompressionMethod.WinZipAES) {
 				ProcessAESExtraData(extraData);
 			}
@@ -1157,7 +1157,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		ushort versionToExtract;                // Version required to extract (library handles <= 2.0)
 		uint crc;
 		uint dosTime;
-		DateTime dateTime;
+		DateTime? dateTime; // DateTime might be obtained from Extra Data, only do this if smb cares, keep NULL until then
 
 		CompressionMethod method = CompressionMethod.Deflated;
 		byte[] extra;
