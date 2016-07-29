@@ -223,7 +223,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			string name = ZipStrings.ConvertToStringExt(flags, buffer);
 
-			entry = new ZipEntry(name, versionRequiredToExtract, ZipConstants.VersionMadeBy, method, DateTime.Now)
+			entry = new ZipEntry(name, null, versionRequiredToExtract, ZipConstants.VersionMadeBy, method, DateTime.Now)
 			{
 				Flags = flags,
 			};
