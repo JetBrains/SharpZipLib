@@ -852,11 +852,12 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <returns>Returns the long value read.</returns>
 		public unsafe long ReadLong()
 		{
-			ReadCheck(8);
+			const int length = sizeof(long);
+			ReadCheck(length);
 			long result;
 			fixed(byte* pData = _data)
 				result = *(long*)(pData + _index);
-			_index += 4;
+			_index += length;
 			return result;
 		}
 
@@ -866,11 +867,12 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <returns>Returns the integer read.</returns>
 		public unsafe int ReadInt()
 		{
-			ReadCheck(4);
+			const int length = sizeof(int);
+			ReadCheck(length);
 			int result;
 			fixed(byte* pData = _data)
 				result = *(int*)(pData + _index);
-			_index += 4;
+			_index += length;
 			return result;
 		}
 
@@ -880,11 +882,12 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <returns>Returns the short value read.</returns>
 		public unsafe int ReadShort()
 		{
-			ReadCheck(4);
+			const int length = sizeof(ushort);
+			ReadCheck(length);
 			int result;
 			fixed(byte* pData = _data)
 				result = *(ushort*)(pData + _index);
-			_index += 4;
+			_index += length;
 			return result;
 		}
 
