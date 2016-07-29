@@ -282,8 +282,9 @@ namespace ICSharpCode.SharpZipLib.Zip
 			long pos = endLocation - minimumBlockSize;
 			if(pos < 0)
 				return -1;
-			// How much we'd have to read: maximum variable data of the block, which might shift signature towards the beginning, or the signature itself
-			int maxlen = Math.Max(maximumVariableData, 4);
+			// How much we'd have to read: either the signature sits at the head of the minimum-block-size from the end (no var-data case),
+			// or it's shifted towards the beginning for up to max-var-data, which means that the signature might be within that max-var-data bytes before the min-block-size, or entering min-block-size for up to 3 bytes (make 4 for simplicity, which matches the prev case)
+			int maxlen = maximumVariableData + 4;
 
 			if(cachebuffer == null)
 				cachebuffer = new byte[maxlen];
@@ -304,7 +305,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			// Now check the whole range
 			// As the range is relatively small, it would be faster to read it all and scan for the signature in-memory then
-			int buflen = maximumVariableData; /* (minsize + maximumVariableData) is the whole block and (-minsize) is the tail where the signature can't be */
+			int buflen = (minimumBlockSize + maximumVariableData) /*the whole possble block*/- (minimumBlockSize - 4) /* the tail in which the signature can't be*/;
 			pos = endLocation - minimumBlockSize - maximumVariableData;
 			if(pos < 0) // File too short, fell off the start
 			{
