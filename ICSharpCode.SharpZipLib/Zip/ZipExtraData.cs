@@ -774,22 +774,26 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Read a long in little endian form from the last <see cref="Find">found</see> data value
 		/// </summary>
 		/// <returns>Returns the long value read.</returns>
-		public long ReadLong()
+		public unsafe long ReadLong()
 		{
 			ReadCheck(8);
-			return (ReadInt() & 0xffffffff) | (((long)ReadInt()) << 32);
+			long result;
+			fixed(byte* pData = _data)
+				result = *(long*)(pData + _index);
+			_index += 4;
+			return result;
 		}
 
 		/// <summary>
 		/// Read an integer in little endian form from the last <see cref="Find">found</see> data value.
 		/// </summary>
 		/// <returns>Returns the integer read.</returns>
-		public int ReadInt()
+		public unsafe int ReadInt()
 		{
 			ReadCheck(4);
-
-			int result = _data[_index] + (_data[_index + 1] << 8) +
-				(_data[_index + 2] << 16) + (_data[_index + 3] << 24);
+			int result;
+			fixed(byte* pData = _data)
+				result = *(int*)(pData + _index);
 			_index += 4;
 			return result;
 		}
@@ -798,11 +802,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Read a short value in little endian form from the last <see cref="Find">found</see> data value.
 		/// </summary>
 		/// <returns>Returns the short value read.</returns>
-		public int ReadShort()
+		public unsafe int ReadShort()
 		{
-			ReadCheck(2);
-			int result = _data[_index] + (_data[_index + 1] << 8);
-			_index += 2;
+			ReadCheck(4);
+			int result;
+			fixed(byte* pData = _data)
+				result = *(ushort*)(pData + _index);
+			_index += 4;
 			return result;
 		}
 
