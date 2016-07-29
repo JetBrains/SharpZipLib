@@ -642,7 +642,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </remarks>
 		public DateTime DateTime
 		{
-			get => dateTime;
+			get => (dateTime ?? (dateTime = GetDateTime(new ZipExtraData(extra)))) ?? default;
 
 			set
 			{
@@ -936,7 +936,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				}
 			}
 
-			DateTime = GetDateTime(extraData) ?? DateTime;
+			// dateTime = GetDateTime(extraData) ?? DateTime; Commented out, because extra data would be delay-extracted now on demand
 			if (method == CompressionMethod.WinZipAES)
 			{
 				ProcessAESExtraData(extraData);
@@ -1136,7 +1136,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private ulong compressedSize;
 		private ushort versionToExtract;                // Version required to extract (library handles <= 2.0)
 		private uint crc;
-		private DateTime dateTime;
+		DateTime? dateTime; // DateTime might be obtained from Extra Data, only do this if smb cares, keep NULL until then
 
 		private CompressionMethod method = CompressionMethod.Deflated;
 		private byte[] extra;
