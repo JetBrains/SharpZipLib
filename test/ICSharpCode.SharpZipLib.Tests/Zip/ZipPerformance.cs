@@ -1,6 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Forms;
 
 using ICSharpCode.SharpZipLib.Zip;
 
@@ -32,15 +34,30 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 
 		private static void DoReadDirectory(List<Stream> zips)
 		{
+			/*
+						for(int a = 0x100; a-- > 0;)
+						{
+							foreach(Stream stream in zips)
+							{
+								using(new ZipFile(stream) {IsStreamOwner = false})
+								{
+								}
+							}
+						}
+
+			  */
+//			MessageBox.Show("Before");
+			IList<IDisposable> disposables = new List<IDisposable>();
 			for(int a = 0x100; a-- > 0;)
 			{
 				foreach(Stream stream in zips)
 				{
-					using(new ZipFile(stream) {IsStreamOwner = false})
-					{
-					}
+					disposables.Add(new ZipFile(stream) {IsStreamOwner = false});
 				}
 			}
+//			MessageBox.Show("After");
+			foreach(IDisposable disposable in disposables)
+				disposable.Dispose();
 		}
 
 		private static List<MemoryStream> GetZipStreams()
