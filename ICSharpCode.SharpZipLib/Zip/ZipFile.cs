@@ -1152,7 +1152,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		#region Updating
 
-		const int DefaultBufferSize = 4096;
+		const int DefaultBufferSize = 81920; // The largest multiple of 4096 which fits in regular heaps without falling into the Large Object Heap
 
 		/// <summary>
 		/// The kind of update to apply.
@@ -2875,13 +2875,6 @@ namespace ICSharpCode.SharpZipLib.Zip
 		}
 
 		#endregion
-		// NOTE this returns the offset of the first byte after the signature.
-		long LocateBlockWithSignature(int signature, long endLocation, int minimumBlockSize, int maximumVariableData)
-		{
-			using (ZipHelperStream les = new ZipHelperStream(baseStream_)) {
-				return les.LocateBlockWithSignature(signature, endLocation, minimumBlockSize, maximumVariableData);
-			}
-		}
 
 		[StructLayout(LayoutKind.Sequential, Pack = 2)]
 		struct CentralDirectoryRecord
@@ -2939,16 +2932,15 @@ namespace ICSharpCode.SharpZipLib.Zip
 			if (baseStream_.CanSeek == false) {
 				throw new ZipException("ZipFile stream must be seekable");
 			}
+			byte[] cachebuffer = GetBuffer();
 
-			long locatedEndOfCentralDir = LocateBlockWithSignature(ZipConstants.EndOfCentralDirectorySignature,
-				baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff);
+			long locatedEndOfCentralDir = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.EndOfCentralDirectorySignature, baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff, cachebuffer);
 
 			if (locatedEndOfCentralDir < 0) {
 				throw new ZipException("Cannot find central directory");
 			}
 
 			// Read end of central directory record
-			byte[] cachebuffer = GetBuffer();
 			if(baseStream_.Read(cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
 				throw new EndOfStreamException("End of stream.");
 			CentralDirectoryRecord cdr;
@@ -2963,10 +2955,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 			uint commentSize = cdr.commentSize;
 
 			if (commentSize > 0) {
-				byte[] comment = new byte[commentSize];
+				byte[] comment = commentSize > cachebuffer.Length ? new byte[commentSize] : cachebuffer;
 
-				StreamUtils.ReadFully(baseStream_, comment);
-				comment_ = ZipConstants.ConvertToString(comment);
+				StreamUtils.ReadFully(baseStream_, comment, 0, (int)commentSize);
+				comment_ = ZipConstants.ConvertToString(comment, (int)commentSize);
 			} else {
 				comment_ = string.Empty;
 			}
@@ -2982,7 +2974,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				(offsetOfCentralDir == 0xffffffff)) {
 				isZip64 = true;
 
-				long offset = LocateBlockWithSignature(ZipConstants.Zip64CentralDirLocatorSignature, locatedEndOfCentralDir, 0, 0x1000);
+				long offset = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.Zip64CentralDirLocatorSignature, locatedEndOfCentralDir, 0, 0x1000, cachebuffer);
 				if (offset < 0) {
 					throw new ZipException("Cannot find Zip64 locator");
 				}
@@ -3047,10 +3039,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 				int needtextsbuffer = Math.Max(entryrecord.nameLen, (int)entryrecord.commentLen);
 				byte[] textsbuffer = needtextsbuffer <= cachebuffer.Length ? cachebuffer : new byte[needtextsbuffer];
 
-				StreamUtils.ReadFully(baseStream_, textsbuffer, 0, entryrecord.nameLen);
-				string name = ZipConstants.ConvertToStringExt(entryrecord.bitFlags, textsbuffer, entryrecord.nameLen);
+				var namebytes = new byte[entryrecord.nameLen];
+				StreamUtils.ReadFully(baseStream_, namebytes, 0, namebytes.Length);
 
-				var entry = new ZipEntry(name, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method, null);
+				var entry = new ZipEntry(null, namebytes, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method, null);
 				entry.Crc = entryrecord.crc & 0xffffffffL;
 				entry.Size = entryrecord.size & 0xffffffffL;
 				entry.CompressedSize = entryrecord.csize & 0xffffffffL;
