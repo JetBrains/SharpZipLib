@@ -150,8 +150,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// The name passed is null
 		/// </exception>
 		public ZipEntry(string name)
-			: this(CleanName(name), 0, ZipConstants.VersionMadeBy, CompressionMethod.Deflated, DateTime.Now)
+			: this(CleanName(name), null, 0, ZipConstants.VersionMadeBy, CompressionMethod.Deflated, DateTime.Now)
 		{
+			if(name == null) // CleanName would allow NULLs, and we by contract need to throw on NULLs
+				throw new ArgumentNullException(nameof(name));
 		}
 
 		/// <summary>
@@ -170,15 +172,18 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// The name passed is null
 		/// </exception>
 		internal ZipEntry(string name, int versionRequiredToExtract)
-			: this(CleanName(name), versionRequiredToExtract, ZipConstants.VersionMadeBy,
+			: this(CleanName(name), null, versionRequiredToExtract, ZipConstants.VersionMadeBy,
 			CompressionMethod.Deflated, DateTime.Now)
 		{
+			if(name == null) // CleanName would allow NULLs, and we by contract need to throw on NULLs
+				throw new ArgumentNullException(nameof(name));
 		}
 
 		/// <summary>
 		/// Initializes an entry with the given name and made by information
 		/// </summary>
 		/// <param name="name">Name for this entry, assumed <see cref="CleanName"/> has been called for it if needed (it's not when initializing from the central directory, so save time).</param>
+		/// <param name="namebytes">Optionally, the original ZIP-stored bytes of the name, to be lazy-decoded into a string.</param>
 		/// <param name="madeByInfo">Version and HostSystem Information</param>
 		/// <param name="versionRequiredToExtract">Minimum required zip feature version required to extract this entry</param>
 		/// <param name="method">Compression method for this entry.</param>
@@ -193,17 +198,21 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// This constructor is used by the ZipFile class when reading from the central header
 		/// It is not generally useful, use the constructor specifying the name only.
 		/// </remarks>
-		internal ZipEntry(string name, int versionRequiredToExtract, int madeByInfo,
+		internal ZipEntry(string name, byte[] namebytes, int versionRequiredToExtract, int madeByInfo,
 			CompressionMethod method, DateTime? datetime)
 		{
-			if (name == null)
+			if ((name == null) && (namebytes == null))
 			{
-				throw new ArgumentNullException(nameof(name));
+				throw new ArgumentNullException(nameof(name), "Either of the names in string or byte form must be specified.");
 			}
 
-			if (name.Length > 0xffff)
+			if (name != null && name.Length > 0xffff)
 			{
-				throw new ArgumentException("Name is too long", nameof(name));
+				throw new ArgumentException("Name is too long.", nameof(name));
+			}
+			if (namebytes != null && namebytes.Length > 0xffff)
+			{
+				throw new ArgumentException("Name is too long.", nameof(namebytes));
 			}
 
 			if ((versionRequiredToExtract != 0) && (versionRequiredToExtract < 10))
@@ -213,7 +222,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			if(datetime.HasValue)
 				DateTime = datetime.Value;
-			this.name = name;
+			nameString = name;
+			nameBytes = namebytes;
 			this.versionMadeBy = (ushort)madeByInfo;
 			this.versionToExtract = (ushort)versionRequiredToExtract;
 			this.method = method;
@@ -236,7 +246,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 
 			known = entry.known;
-			name = entry.name;
+			nameString = entry.nameString;
+			nameBytes = entry.nameBytes;
 			size = entry.size;
 			compressedSize = entry.compressedSize;
 			crc = entry.crc;
@@ -652,18 +663,31 @@ namespace ICSharpCode.SharpZipLib.Zip
 		}
 
 		/// <summary>
-		/// Returns the entry name.
+		///  Returns the entry name, decoded with generic UNIX ZIP rules (as opposed to OPC rules for example).
 		/// </summary>
 		/// <remarks>
-		/// The unix naming convention is followed.
-		/// Path components in the entry should always separated by forward slashes ('/').
-		/// Dos device names like C: should also be removed.
-		/// See the <see cref="ZipNameTransform"/> class, or <see cref="CleanName(string)"/>
-		///</remarks>
+		///  The unix naming convention is followed.
+		///  Path components in the entry should always separated by forward slashes ('/').
+		///  Dos device names like C: should also be removed.
+		///  See the <see cref="ZipNameTransform" /> class, or <see cref="CleanName(string)" />
+		/// </remarks>
 		public string Name
 		{
-			get => name;
-			internal set => name = value;
+			get
+			{
+				if(nameString == null)
+				{
+					if(nameBytes == null)
+						throw new InvalidOperationException("Either name string or name bytes must be known.");
+					nameString = ZipStrings.ConvertToStringExt(flags /* to tell if it's Unicode */, nameBytes, nameBytes.Length);
+				}
+				return nameString;
+			}
+			internal set
+			{
+				nameString = value;
+				nameBytes = null;
+			}
 		}
 
 		/// <summary>
@@ -714,7 +738,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 			get => (known & Known.Crc) != 0 ? crc & 0xffffffffL : -1L;
 			set
 			{
-				if ((crc & 0xffffffff00000000L) != 0)
+				if ((crc & unchecked((long)0xffffffff00000000UL)) != 0)
 				{
 					throw new ArgumentOutOfRangeException(nameof(value));
 				}
@@ -1030,9 +1054,32 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Currently only dos/windows attributes are tested in this manner.
 		/// The trailing slash convention should always be followed.
 		/// </remarks>
-		public bool IsDirectory 
-			=> name.Length > 0 
-			&& (name[name.Length - 1] == '/' || name[name.Length - 1] == '\\') || HasDosAttributes(16);
+		public bool IsDirectory {
+			get
+			{
+				if(nameBytes != null)
+				{
+					// Both in UTF-8 and 8-bit encodings the last slash char would still be the last slash byte (UNIX relies on this compat for all the checks)
+					// We don't expect UTF-16LE and such here
+					int nameLength = nameBytes.Length;
+					return 
+						((nameLength > 0) &&
+						((nameBytes[nameLength - 1] == '/') || (nameBytes[nameLength - 1] == '\\'))) ||
+						HasDosAttributes(16)
+						;
+				}
+				if(nameString != null)
+				{
+					int nameLength = nameString.Length;
+					return 
+						((nameLength > 0) &&
+							((nameString[nameLength - 1] == '/') || (nameString[nameLength - 1] == '\\'))) ||
+						HasDosAttributes(16)
+						;
+				}
+				throw new InvalidOperationException("Either name string or name bytes must be known.");
+			}
+		}
 
 		/// <summary>
 		/// Get a value of true if the entry appears to be a file; false otherwise
@@ -1075,7 +1122,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Gets a string representation of this ZipEntry.
 		/// </summary>
 		/// <returns>A readable textual representation of this <see cref="ZipEntry"/></returns>
-		public override string ToString() => name;
+		public override string ToString() => Name;
 
 		/// <summary>
 		/// Test a <see cref="CompressionMethod">compression method</see> to see if this library
@@ -1131,7 +1178,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private ushort versionMadeBy;                   // Contains host system and version information
 														// only relevant for central header entries
 
-		private string name;
+		private string nameString; // Might be NULL if nameBytes have been read as bytes and not yet decoded into the string; decoded on-demand with the default ZIP algorithm using the static codepage of the lib and the Unicode flag of the file
+		private byte[] nameBytes; // Optional. If read from the ZIP file, stores the name as the original ZIP bytes
 		private ulong size;
 		private ulong compressedSize;
 		private ushort versionToExtract;                // Version required to extract (library handles <= 2.0)
