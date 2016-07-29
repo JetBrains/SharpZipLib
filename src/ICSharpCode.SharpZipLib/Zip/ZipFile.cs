@@ -3629,7 +3629,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				StreamUtils.ReadFully(baseStream_, textsbuffer, 0, entryrecord.nameLen);
 				string name = ZipStrings.ConvertToStringExt(entryrecord.bitFlags, textsbuffer, entryrecord.nameLen);
 
-				var entry = new ZipEntry(name, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method);
+				var entry = new ZipEntry(name, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method, null);
 				entry.Crc = entryrecord.crc & 0xffffffffL;
 				entry.Size = entryrecord.size & 0xffffffffL;
 				entry.CompressedSize = entryrecord.csize & 0xffffffffL;
