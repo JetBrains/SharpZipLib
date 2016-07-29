@@ -3648,7 +3648,9 @@ namespace ICSharpCode.SharpZipLib.Zip
 					entry.ExtraData = extra;
 				}
 
-				entry.ProcessExtraData(false);
+				// Process extra data only if we need immediate props from it, other stuff will be read on-demand
+				if((entryrecord.size == UInt32.MaxValue) || (entryrecord.csize == UInt32.MaxValue) || (entryrecord.offset == UInt32.MaxValue) || (entryrecord.method == (int)CompressionMethod.WinZipAES))
+					entry.ProcessExtraData(true);
 
 				if (entryrecord.commentLen > 0)
 				{
