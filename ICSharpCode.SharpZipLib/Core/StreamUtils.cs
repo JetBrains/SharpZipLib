@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace ICSharpCode.SharpZipLib.Core
 {
@@ -29,6 +30,7 @@ namespace ICSharpCode.SharpZipLib.Core
 		/// <exception cref="ArgumentNullException">Required parameter is null</exception>
 		/// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> and or <paramref name="count"/> are invalid.</exception>
 		/// <exception cref="EndOfStreamException">End of stream is encountered before all the data has been read.</exception>
+		[MethodImpl(/*MethodImplOptions.AggressiveInlining*/0x100/*this would work even if building for older targetfxes in case run with a new runtime, would be ignored in olders*/)]
 		static public void ReadFully(Stream stream, byte[] buffer, int offset, int count)
 		{
 			if (stream == null) {
