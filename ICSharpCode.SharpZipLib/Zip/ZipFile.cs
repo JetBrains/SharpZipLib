@@ -2920,6 +2920,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </exception>
 		unsafe void ReadEntries()
 		{
+			if (baseStream_.CanSeek == false) {
+				throw new ZipException("ZipFile stream must be seekable.");
+			}
+			byte[] cachebuffer = GetBuffer();
+
 			// Search for the End Of Central Directory.  When a zip comment is
 			// present the directory will start earlier
 			// 
@@ -2927,22 +2932,14 @@ namespace ICSharpCode.SharpZipLib.Zip
 			// This should be compatible with both SFX and ZIP files but has only been tested for Zip files
 			// If a SFX file has the Zip data attached as a resource and there are other resources occuring later then
 			// this could be invalid.
-			// Could also speed this up by reading memory in larger blocks.			
-
-			if (baseStream_.CanSeek == false) {
-				throw new ZipException("ZipFile stream must be seekable");
-			}
-			byte[] cachebuffer = GetBuffer();
-
-			long locatedEndOfCentralDir = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.EndOfCentralDirectorySignature, baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff, cachebuffer);
-
+			long locatedEndOfCentralDir = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.EndOfCentralDirectorySignature, baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff/*max comment size*/, cachebuffer);
 			if (locatedEndOfCentralDir < 0) {
 				throw new ZipException("Cannot find central directory");
 			}
 
 			// Read end of central directory record
 			if(baseStream_.Read(cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
-				throw new EndOfStreamException("End of stream.");
+				throw new EndOfStreamException("End of stream encountered while reading the central directory record."); // Not expecting this really because the search of this record takes its base size into account
 			CentralDirectoryRecord cdr;
 			fixed(byte* pCache = cachebuffer)
 				cdr = *(CentralDirectoryRecord*)pCache;
@@ -2954,11 +2951,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 			long offsetOfCentralDir = cdr.offsetOfCentralDir;
 			uint commentSize = cdr.commentSize;
 
-			if (commentSize > 0) {
-				byte[] comment = commentSize > cachebuffer.Length ? new byte[commentSize] : cachebuffer;
-
-				StreamUtils.ReadFully(baseStream_, comment, 0, (int)commentSize);
-				comment_ = ZipConstants.ConvertToString(comment, (int)commentSize);
+			if(commentSize > 0)
+			{
+				// Use cachebuffer to read the comment, realloc to a larger buffer (and then use further) if required
+				if(commentSize > cachebuffer.Length)
+					cachebuffer = new byte[Math.Max(commentSize, cachebuffer.Length * 2) /* don't realloc by small values */];
+				StreamUtils.ReadFully(baseStream_, cachebuffer, 0, (int)commentSize);
+				comment_ = ZipConstants.ConvertToString(cachebuffer, (int)commentSize);
 			} else {
 				comment_ = string.Empty;
 			}
@@ -2973,11 +2972,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 				(centralDirSize == 0xffffffff) ||
 				(offsetOfCentralDir == 0xffffffff)) {
 				isZip64 = true;
-
+				
 				long offset = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.Zip64CentralDirLocatorSignature, locatedEndOfCentralDir, 0, 0x1000, cachebuffer);
 				if (offset < 0) {
 					throw new ZipException("Cannot find Zip64 locator");
 				}
+
+				// NOTE: the reads for Zip64CentralDir still go with multiple ReadByte virtual calls, have not been optimized yet because in most real cases archives do not have this record
 
 				// number of the disk with the start of the zip64 end of central directory 4 bytes 
 				// relative offset of the zip64 end of central directory record 8 bytes 
@@ -3027,17 +3028,14 @@ namespace ICSharpCode.SharpZipLib.Zip
 			for (ulong i = 0; i < entriesForThisDisk; i++) 
 			{
 				if(baseStream_.Read(cachebuffer, 0, sizeof(EntryRecord)) < sizeof(EntryRecord))
-					throw new EndOfStreamException("End of stream.");
+					throw new EndOfStreamException($"End of stream encountered while reading the entry record for entry #{i:N0}.");
 				EntryRecord entryrecord;
 				fixed(byte* pCache = cachebuffer)
 					entryrecord = *(EntryRecord*)pCache;
 
 				if (entryrecord.signature != ZipConstants.CentralHeaderSignature) {
-					throw new ZipException("Wrong Central Directory signature");
+					throw new ZipException("The entry record signature field does not match the expected value for the Central Directory Entry Record signature.");
 				}
-
-				int needtextsbuffer = Math.Max(entryrecord.nameLen, (int)entryrecord.commentLen);
-				byte[] textsbuffer = needtextsbuffer <= cachebuffer.Length ? cachebuffer : new byte[needtextsbuffer];
 
 				var namebytes = new byte[entryrecord.nameLen];
 				StreamUtils.ReadFully(baseStream_, namebytes, 0, namebytes.Length);
@@ -3060,7 +3058,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 				if (entryrecord.extraLen > 0) {
 					byte[] extra = new byte[entryrecord.extraLen];
-					StreamUtils.ReadFully(baseStream_, extra);
+					StreamUtils.ReadFully(baseStream_, extra, 0, extra.Length);
 					entry.ExtraData = extra;
 				}
 
@@ -3068,9 +3066,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 				if((entryrecord.size == UInt32.MaxValue) || (entryrecord.csize == UInt32.MaxValue) || (entryrecord.offset == UInt32.MaxValue) || (entryrecord.method == (int)CompressionMethod.WinZipAES))
 					entry.ProcessExtraData(true);
 
-				if (entryrecord.commentLen > 0) {
-					StreamUtils.ReadFully(baseStream_, textsbuffer, 0, entryrecord.commentLen);
-					entry.Comment = ZipConstants.ConvertToStringExt(entryrecord.bitFlags, textsbuffer, entryrecord.commentLen);
+				if(entryrecord.commentLen > 0)
+				{
+					// Use cachebuffer to read the comment, realloc to a larger buffer (and then use further) if required
+					if(entryrecord.commentLen > cachebuffer.Length)
+						cachebuffer = new byte[Math.Max(entryrecord.commentLen, cachebuffer.Length * 2) /* don't realloc by small values */];
+					StreamUtils.ReadFully(baseStream_, cachebuffer, 0, entryrecord.commentLen);
+					entry.Comment = ZipConstants.ConvertToString(cachebuffer, entryrecord.commentLen);
 				}
 
 				entries_[i] = entry;
