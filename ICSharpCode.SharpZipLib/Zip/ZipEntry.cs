@@ -1103,6 +1103,17 @@ namespace ICSharpCode.SharpZipLib.Zip
 			return IsCompressionMethodSupported(CompressionMethod);
 		}
 
+		/// <summary>
+		///     <para>Gets the entry name in the raw format as it's written in the ZIP Directory, in case it has to be decoded against special rules (for example, as an OPC Part URI or OPC Part IRI).</para>
+		///     <para>Might be unavailable, in which case you will have to take the <see cref="Name" />. Generally, should be available if the entry has been opened from the ZIP Central Directory. In this case the string decoding is delayed.</para>
+		///     <para>NULL if the byte representation of the name is not available.</para>
+		/// </summary>
+		/// <returns></returns>
+		public byte[] TryGetNameBytes()
+		{
+			return nameBytes;
+		}
+
 		#region ICloneable Members
 		/// <summary>
 		/// Creates a copy of this zip entry.
