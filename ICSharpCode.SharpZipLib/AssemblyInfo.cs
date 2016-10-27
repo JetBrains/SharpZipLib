@@ -9,4 +9,4 @@ using System.Reflection;
 [assembly: CLSCompliant(true)]
 
 // If SharpZipLib is strongly named it still allows partially trusted callers
-[assembly: System.Security.AllowPartiallyTrustedCallers]
+//[assembly: System.Security.AllowPartiallyTrustedCallers]

@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using System.Text;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using ICSharpCode.SharpZipLib.Encryption;
 using ICSharpCode.SharpZipLib.Core;
@@ -1151,7 +1152,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		#region Updating
 
-		const int DefaultBufferSize = 4096;
+		const int DefaultBufferSize = 81920; // The largest multiple of 4096 which fits in regular heaps without falling into the Large Object Heap
 
 		/// <summary>
 		/// The kind of update to apply.
@@ -1169,11 +1170,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public INameTransform NameTransform {
 			get {
-				return updateEntryFactory_.NameTransform;
+				return EntryFactory.NameTransform;
 			}
 
 			set {
-				updateEntryFactory_.NameTransform = value;
+				EntryFactory.NameTransform = value;
 			}
 		}
 
@@ -1183,15 +1184,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public IEntryFactory EntryFactory {
 			get {
-				return updateEntryFactory_;
+				return updateEntryFactory_ ?? (updateEntryFactory_ = new ZipEntryFactory());
 			}
 
 			set {
-				if (value == null) {
-					updateEntryFactory_ = new ZipEntryFactory();
-				} else {
-					updateEntryFactory_ = value;
-				}
+				updateEntryFactory_ = value;
 			}
 		}
 
@@ -2832,6 +2829,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		#region Internal routines
 		#region Reading
+
 		/// <summary>
 		/// Read an unsigned short in little endian byte order.
 		/// </summary>
@@ -2839,22 +2837,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="EndOfStreamException">
 		/// The stream ends prematurely
 		/// </exception>
-		ushort ReadLEUshort()
+		unsafe ushort ReadLEUshort()
 		{
-			int data1 = baseStream_.ReadByte();
-
-			if (data1 < 0) {
-				throw new EndOfStreamException("End of stream");
-			}
-
-			int data2 = baseStream_.ReadByte();
-
-			if (data2 < 0) {
-				throw new EndOfStreamException("End of stream");
-			}
-
-
-			return unchecked((ushort)((ushort)data1 | (ushort)(data2 << 8)));
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(ushort)) < sizeof(ushort))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(ushort*)pBuffer;
 		}
 
 		/// <summary>
@@ -2867,23 +2856,57 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="System.IO.EndOfStreamException">
 		/// The file ends prematurely
 		/// </exception>
-		uint ReadLEUint()
+		unsafe uint ReadLEUint()
 		{
-			return (uint)(ReadLEUshort() | (ReadLEUshort() << 16));
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(uint)) < sizeof(uint))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(uint*)pBuffer;
 		}
 
-		ulong ReadLEUlong()
+		unsafe ulong ReadLEUlong()
 		{
-			return ReadLEUint() | ((ulong)ReadLEUint() << 32);
+			byte[] buffer = GetBuffer();
+			if(baseStream_.Read(buffer, 0, sizeof(ulong)) < sizeof(ulong))
+				throw new EndOfStreamException("End of stream.");
+			fixed(byte* pBuffer = buffer)
+				return *(ulong*)pBuffer;
 		}
 
 		#endregion
-		// NOTE this returns the offset of the first byte after the signature.
-		long LocateBlockWithSignature(int signature, long endLocation, int minimumBlockSize, int maximumVariableData)
+
+		[StructLayout(LayoutKind.Sequential, Pack = 2)]
+		struct CentralDirectoryRecord
 		{
-			using (ZipHelperStream les = new ZipHelperStream(baseStream_)) {
-				return les.LocateBlockWithSignature(signature, endLocation, minimumBlockSize, maximumVariableData);
-			}
+			public ushort thisDiskNumber;
+			public ushort startCentralDirDisk;
+			public ushort entriesForThisDisk;
+			public ushort entriesForWholeCentralDir;
+			public uint centralDirSize;
+			public uint offsetOfCentralDir;
+			public ushort commentSize;
+		}
+
+		[StructLayout(LayoutKind.Sequential, Pack = 2)]
+		struct EntryRecord
+		{
+			public uint signature;
+			public ushort versionMadeBy;
+			public ushort versionToExtract;
+			public ushort bitFlags;
+			public ushort method;
+			public uint dostime;
+			public uint crc;
+			public uint csize;
+			public uint size;
+			public ushort nameLen;
+			public ushort extraLen;
+			public ushort commentLen;
+			public ushort diskStartNo;
+			public ushort internalAttributes;
+			public uint externalAttributes;
+			public uint offset;
 		}
 
 		/// <summary>
@@ -2895,8 +2918,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="ICSharpCode.SharpZipLib.Zip.ZipException">
 		/// The central directory is malformed or cannot be found
 		/// </exception>
-		void ReadEntries()
+		unsafe void ReadEntries()
 		{
+			if (baseStream_.CanSeek == false) {
+				throw new ZipException("ZipFile stream must be seekable.");
+			}
+			byte[] cachebuffer = GetBuffer();
+
 			// Search for the End Of Central Directory.  When a zip comment is
 			// present the directory will start earlier
 			// 
@@ -2904,33 +2932,32 @@ namespace ICSharpCode.SharpZipLib.Zip
 			// This should be compatible with both SFX and ZIP files but has only been tested for Zip files
 			// If a SFX file has the Zip data attached as a resource and there are other resources occuring later then
 			// this could be invalid.
-			// Could also speed this up by reading memory in larger blocks.			
-
-			if (baseStream_.CanSeek == false) {
-				throw new ZipException("ZipFile stream must be seekable");
-			}
-
-			long locatedEndOfCentralDir = LocateBlockWithSignature(ZipConstants.EndOfCentralDirectorySignature,
-				baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff);
-
+			long locatedEndOfCentralDir = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.EndOfCentralDirectorySignature, baseStream_.Length, ZipConstants.EndOfCentralRecordBaseSize, 0xffff/*max comment size*/, cachebuffer);
 			if (locatedEndOfCentralDir < 0) {
 				throw new ZipException("Cannot find central directory");
 			}
 
 			// Read end of central directory record
-			ushort thisDiskNumber = ReadLEUshort();
-			ushort startCentralDirDisk = ReadLEUshort();
-			ulong entriesForThisDisk = ReadLEUshort();
-			ulong entriesForWholeCentralDir = ReadLEUshort();
-			ulong centralDirSize = ReadLEUint();
-			long offsetOfCentralDir = ReadLEUint();
-			uint commentSize = ReadLEUshort();
+			if(baseStream_.Read(cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
+				throw new EndOfStreamException("End of stream encountered while reading the central directory record."); // Not expecting this really because the search of this record takes its base size into account
+			CentralDirectoryRecord cdr;
+			fixed(byte* pCache = cachebuffer)
+				cdr = *(CentralDirectoryRecord*)pCache;
+			ushort thisDiskNumber = cdr.thisDiskNumber;
+			ushort startCentralDirDisk = cdr.startCentralDirDisk;
+			ulong entriesForThisDisk = cdr.entriesForThisDisk;
+			ulong entriesForWholeCentralDir = cdr.entriesForWholeCentralDir;
+			ulong centralDirSize = cdr.centralDirSize;
+			long offsetOfCentralDir = cdr.offsetOfCentralDir;
+			uint commentSize = cdr.commentSize;
 
-			if (commentSize > 0) {
-				byte[] comment = new byte[commentSize];
-
-				StreamUtils.ReadFully(baseStream_, comment);
-				comment_ = ZipConstants.ConvertToString(comment);
+			if(commentSize > 0)
+			{
+				// Use cachebuffer to read the comment, realloc to a larger buffer (and then use further) if required
+				if(commentSize > cachebuffer.Length)
+					cachebuffer = new byte[Math.Max(commentSize, cachebuffer.Length * 2) /* don't realloc by small values */];
+				StreamUtils.ReadFully(baseStream_, cachebuffer, 0, (int)commentSize);
+				comment_ = ZipConstants.ConvertToString(cachebuffer, (int)commentSize);
 			} else {
 				comment_ = string.Empty;
 			}
@@ -2945,11 +2972,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 				(centralDirSize == 0xffffffff) ||
 				(offsetOfCentralDir == 0xffffffff)) {
 				isZip64 = true;
-
-				long offset = LocateBlockWithSignature(ZipConstants.Zip64CentralDirLocatorSignature, locatedEndOfCentralDir, 0, 0x1000);
+				
+				long offset = ZipHelperStream.LocateBlockWithSignature(baseStream_, ZipConstants.Zip64CentralDirLocatorSignature, locatedEndOfCentralDir, 0, 0x1000, cachebuffer);
 				if (offset < 0) {
 					throw new ZipException("Cannot find Zip64 locator");
 				}
+
+				// NOTE: the reads for Zip64CentralDir still go with multiple ReadByte virtual calls, have not been optimized yet because in most real cases archives do not have this record
 
 				// number of the disk with the start of the zip64 end of central directory 4 bytes 
 				// relative offset of the zip64 end of central directory record 8 bytes 
@@ -2996,61 +3025,54 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			baseStream_.Seek(offsetOfFirstEntry + offsetOfCentralDir, SeekOrigin.Begin);
 
-			for (ulong i = 0; i < entriesForThisDisk; i++) {
-				if (ReadLEUint() != ZipConstants.CentralHeaderSignature) {
-					throw new ZipException("Wrong Central Directory signature");
+			for (ulong i = 0; i < entriesForThisDisk; i++) 
+			{
+				if(baseStream_.Read(cachebuffer, 0, sizeof(EntryRecord)) < sizeof(EntryRecord))
+					throw new EndOfStreamException($"End of stream encountered while reading the entry record for entry #{i:N0}.");
+				EntryRecord entryrecord;
+				fixed(byte* pCache = cachebuffer)
+					entryrecord = *(EntryRecord*)pCache;
+
+				if (entryrecord.signature != ZipConstants.CentralHeaderSignature) {
+					throw new ZipException("The entry record signature field does not match the expected value for the Central Directory Entry Record signature.");
 				}
 
-				int versionMadeBy = ReadLEUshort();
-				int versionToExtract = ReadLEUshort();
-				int bitFlags = ReadLEUshort();
-				int method = ReadLEUshort();
-				uint dostime = ReadLEUint();
-				uint crc = ReadLEUint();
-				var csize = (long)ReadLEUint();
-				var size = (long)ReadLEUint();
-				int nameLen = ReadLEUshort();
-				int extraLen = ReadLEUshort();
-				int commentLen = ReadLEUshort();
+				var namebytes = new byte[entryrecord.nameLen];
+				StreamUtils.ReadFully(baseStream_, namebytes, 0, namebytes.Length);
 
-				int diskStartNo = ReadLEUshort();  // Not currently used
-				int internalAttributes = ReadLEUshort();  // Not currently used
-
-				uint externalAttributes = ReadLEUint();
-				long offset = ReadLEUint();
-
-				byte[] buffer = new byte[Math.Max(nameLen, commentLen)];
-
-				StreamUtils.ReadFully(baseStream_, buffer, 0, nameLen);
-				string name = ZipConstants.ConvertToStringExt(bitFlags, buffer, nameLen);
-
-				var entry = new ZipEntry(name, versionToExtract, versionMadeBy, (CompressionMethod)method);
-				entry.Crc = crc & 0xffffffffL;
-				entry.Size = size & 0xffffffffL;
-				entry.CompressedSize = csize & 0xffffffffL;
-				entry.Flags = bitFlags;
-				entry.DosTime = (uint)dostime;
+				var entry = new ZipEntry(null, namebytes, entryrecord.versionToExtract, entryrecord.versionMadeBy, (CompressionMethod)entryrecord.method, null);
+				entry.Crc = entryrecord.crc & 0xffffffffL;
+				entry.Size = entryrecord.size & 0xffffffffL;
+				entry.CompressedSize = entryrecord.csize & 0xffffffffL;
+				entry.Flags = entryrecord.bitFlags;
+				entry.DosTime = entryrecord.dostime;
 				entry.ZipFileIndex = (long)i;
-				entry.Offset = offset;
-				entry.ExternalFileAttributes = (int)externalAttributes;
+				entry.Offset = entryrecord.offset;
+				entry.ExternalFileAttributes = (int)entryrecord.externalAttributes;
 
-				if ((bitFlags & 8) == 0) {
-					entry.CryptoCheckValue = (byte)(crc >> 24);
+				if ((entryrecord.bitFlags & 8) == 0) {
+					entry.CryptoCheckValue = (byte)(entryrecord.crc >> 24);
 				} else {
-					entry.CryptoCheckValue = (byte)((dostime >> 8) & 0xff);
+					entry.CryptoCheckValue = (byte)((entryrecord.dostime >> 8) & 0xff);
 				}
 
-				if (extraLen > 0) {
-					byte[] extra = new byte[extraLen];
-					StreamUtils.ReadFully(baseStream_, extra);
+				if (entryrecord.extraLen > 0) {
+					byte[] extra = new byte[entryrecord.extraLen];
+					StreamUtils.ReadFully(baseStream_, extra, 0, extra.Length);
 					entry.ExtraData = extra;
 				}
 
-				entry.ProcessExtraData(false);
+				// Process extra data only if we need immediate props from it, other stuff will be read on-demand
+				if((entryrecord.size == UInt32.MaxValue) || (entryrecord.csize == UInt32.MaxValue) || (entryrecord.offset == UInt32.MaxValue) || (entryrecord.method == (int)CompressionMethod.WinZipAES))
+					entry.ProcessExtraData(true);
 
-				if (commentLen > 0) {
-					StreamUtils.ReadFully(baseStream_, buffer, 0, commentLen);
-					entry.Comment = ZipConstants.ConvertToStringExt(bitFlags, buffer, commentLen);
+				if(entryrecord.commentLen > 0)
+				{
+					// Use cachebuffer to read the comment, realloc to a larger buffer (and then use further) if required
+					if(entryrecord.commentLen > cachebuffer.Length)
+						cachebuffer = new byte[Math.Max(entryrecord.commentLen, cachebuffer.Length * 2) /* don't realloc by small values */];
+					StreamUtils.ReadFully(baseStream_, cachebuffer, 0, entryrecord.commentLen);
+					entry.Comment = ZipConstants.ConvertToString(cachebuffer, entryrecord.commentLen);
 				}
 
 				entries_[i] = entry;
@@ -3195,7 +3217,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		byte[] copyBuffer_;
 		ZipString newComment_;
 		bool commentEdited_;
-		IEntryFactory updateEntryFactory_ = new ZipEntryFactory();
+		IEntryFactory updateEntryFactory_; // Lazy-initialized when accessed via prop, NULL until needed
 		#endregion
 		#endregion
 

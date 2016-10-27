@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ICSharpCode.SharpZipLib.Zip
@@ -263,22 +264,65 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <returns>Eeturns the offset of the first byte after the signature; -1 if not found</returns>
 		public long LocateBlockWithSignature(int signature, long endLocation, int minimumBlockSize, int maximumVariableData)
 		{
+			return LocateBlockWithSignature(stream_, signature, endLocation, minimumBlockSize, maximumVariableData);
+		}
+
+		/// <summary>
+		/// Locates a block with the desired <paramref name="signature" />.
+		/// </summary>
+		/// <param name="stream"></param>
+		/// <param name="signature">The signature to find.</param>
+		/// <param name="endLocation">Location, marking the end of block.</param>
+		/// <param name="minimumBlockSize">Minimum size of the block.</param>
+		/// <param name="maximumVariableData">The maximum variable data.</param>
+		/// <param name="cachebuffer"></param>
+		/// <returns>Eeturns the offset of the first byte after the signature; -1 if not found</returns>
+		public static unsafe long LocateBlockWithSignature(Stream stream, int signature, long endLocation, int minimumBlockSize, int maximumVariableData, [Optional] byte[] cachebuffer)
+		{
 			long pos = endLocation - minimumBlockSize;
-			if (pos < 0) {
+			if(pos < 0)
 				return -1;
+			// How much we'd have to read: either the signature sits at the head of the minimum-block-size from the end (no var-data case),
+			// or it's shifted towards the beginning for up to max-var-data, which means that the signature might be within that max-var-data bytes before the min-block-size, or entering min-block-size for up to 3 bytes (make 4 for simplicity, which matches the prev case)
+			int maxlen = maximumVariableData + 4;
+
+			if(cachebuffer == null)
+				cachebuffer = new byte[maxlen];
+			else if(cachebuffer.Length < maxlen)
+				throw new ArgumentOutOfRangeException(nameof(cachebuffer), cachebuffer.Length, $"The cache buffer length {cachebuffer.Length:N0} is not large enough to fit the lookup area for signature or maximum-variable-data ({maxlen:N0}.");
+
+			// First shot at exactly the minimum-block-size (for example, when looking for ZIP end-central-directory, this would be the hit if there're no zip comments)
+			stream.Seek(pos, SeekOrigin.Begin);
+			if(stream.Read(cachebuffer, 0, 4 /* ensured it'd fit*/) < 4)
+				return -1; // Out of stream
+			fixed(byte* pBuffer = cachebuffer)
+			{
+				if(*(int*)pBuffer == signature)
+					return stream.Position;
 			}
+			if(maximumVariableData == 0)
+				return -1; // The only possible position that were
 
-			long giveUpMarker = Math.Max(pos - maximumVariableData, 0);
-
-			// TODO: This loop could be optimised for speed.
-			do {
-				if (pos < giveUpMarker) {
-					return -1;
+			// Now check the whole range
+			// As the range is relatively small, it would be faster to read it all and scan for the signature in-memory then
+			int buflen = (minimumBlockSize + maximumVariableData) /*the whole possble block*/- (minimumBlockSize - 4) /* the tail in which the signature can't be*/;
+			pos = endLocation - minimumBlockSize - maximumVariableData;
+			if(pos < 0) // File too short, fell off the start
+			{
+				buflen += (int)pos;
+				pos = 0;
+			}
+			stream.Seek(pos, SeekOrigin.Begin);
+			buflen = stream.Read(cachebuffer, 0, buflen);
+			fixed(byte* pBuffer = cachebuffer)
+			{
+				for(int a = buflen - 4; a-- > 0;)
+				{
+					if(*(int*)(pBuffer + a) == signature)
+						return (stream.Position = pos + a + 4);
 				}
-				Seek(pos--, SeekOrigin.Begin);
-			} while (ReadLEInt() != signature);
-
-			return Position;
+			}
+			return -1;
 		}
 
 		/// <summary>
