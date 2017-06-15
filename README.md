@@ -1,48 +1,6 @@
 [![Stories in Ready](https://badge.waffle.io/McNeight/SharpZipLib.png?label=ready&title=Ready)](https://waffle.io/McNeight/SharpZipLib)
 # SharpZipLib
 
-[![Join the chat at https://gitter.im/icsharpcode/SharpZipLib](https://badges.gitter.im/icsharpcode/SharpZipLib.svg)](https://gitter.im/icsharpcode/SharpZipLib?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
-<table>
-  <tr>
-    <th style="text-align:center">Build Server</th>
-    <th>Operating System</th>
-    <th>Framework</th>
-    <th style="text-align:center">Status</th>
-  </tr>
-  <tr>
-    <td style="text-align:center">AppVeyor</td>
-    <td>Windows Server 2012</td>
-    <td>.NET Framework 4.5</td>
-    <td style="text-align:center"><a href="https://ci.appveyor.com/project/McNeight/SharpZipLib/branch/master"><img src="https://ci.appveyor.com/api/projects/status/oe7kwnaib3qscm8l/branch/master?svg=true" alt="AppVeyor build status" /></a></td>
-  </tr>
-  <tr>
-    <td style="text-align:center" rowspan="2">Travis</td>
-    <td>Ubuntu 12.04.5 LTS</td>
-    <td>Mono 4.2.3</td>
-    <td style="text-align:center" rowspan="2">
-    <a href="https://travis-ci.org/McNeight/SharpZipLib"><img src="https://travis-ci.org/McNeight/SharpZipLib.svg?branch=master" alt="Travis build status" /></a></td>
-  </tr>
-  <tr>
-    <td>MacOSX 13.4.0.0</td>
-    <td>Mono 4.2.3</td>
-  </tr>
-  <tr>
-    <td style="text-align:center" rowspan="3">Bitrise (Soon)</td>
-    <td>OSX</td>
-    <td>Xamarin.iOS</td>
-    <td style="text-align:center" rowspan="3"></td>
-  </tr>
-  <tr>
-    <td>OSX</td>
-    <td>Xamarin.Android</td>
-  </tr>
-  <tr>
-    <td>OSX</td>
-    <td>Xamarin.Mac</td>
-  </tr>
-</table>
-
 Introduction
 ------------
 
