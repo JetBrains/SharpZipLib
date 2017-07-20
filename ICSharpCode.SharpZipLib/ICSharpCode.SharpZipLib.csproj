@@ -64,7 +64,7 @@
     <SignAssembly>true</SignAssembly>
   </PropertyGroup>
   <PropertyGroup>
-    <AssemblyOriginatorKeyFile>..\ICSharpCode.SharpZipLib.snk</AssemblyOriginatorKeyFile>
+    <AssemblyOriginatorKeyFile>..\ICSharpCode.SharpZipLib.JetBrains.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
