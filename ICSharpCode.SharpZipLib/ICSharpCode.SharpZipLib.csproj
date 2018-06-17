@@ -87,6 +87,7 @@
     <Compile Include="Core\FileSystemScanner.cs" />
     <Compile Include="Core\INameTransform.cs" />
     <Compile Include="Core\IScanFilter.cs" />
+    <Compile Include="Core\InvalidNameException.cs" />
     <Compile Include="Core\NameFilter.cs" />
     <Compile Include="Core\PathFilter.cs" />
     <Compile Include="Core\StreamUtils.cs" />

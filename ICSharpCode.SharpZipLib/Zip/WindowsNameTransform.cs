@@ -14,13 +14,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Initialises a new instance of <see cref="WindowsNameTransform"/>
 		/// </summary>
 		/// <param name="baseDirectory"></param>
-		public WindowsNameTransform(string baseDirectory)
+		/// <param name="allowParentTraversal">Allow parent directory traversal in file paths (e.g. ../file)</param>
+		public WindowsNameTransform(string baseDirectory, bool allowParentTraversal = false)
 		{
-			if (baseDirectory == null) {
-				throw new ArgumentNullException(nameof(baseDirectory), "Directory name is invalid");
-			}
-
-			BaseDirectory = baseDirectory;
+			BaseDirectory = baseDirectory ?? throw new ArgumentNullException(nameof(baseDirectory), "Directory name is invalid");
+			AllowParentTraversal = allowParentTraversal;
 		}
 
 		/// <summary>
@@ -46,6 +44,15 @@ namespace ICSharpCode.SharpZipLib.Zip
 		}
 
 		/// <summary>
+		/// Allow parent directory traversal in file paths (e.g. ../file)
+		/// </summary>
+		public bool AllowParentTraversal
+		{
+			get => _allowParentTraversal;
+			set => _allowParentTraversal = value;
+		}
+
+		/// <summary>
 		/// Gets or sets a value indicating wether paths on incoming values should be removed.
 		/// </summary>
 		public bool TrimIncomingPaths {
@@ -66,7 +73,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 					name = name.Remove(name.Length - 1, 1);
 				}
 			} else {
-				throw new ZipException("Cannot have an empty directory name");
+				throw new InvalidNameException("Cannot have an empty directory name");
 			}
 			return name;
 		}
@@ -89,6 +96,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 				// Combine will throw a PathTooLongException in that case.
 				if (_baseDirectory != null) {
 					name = Path.Combine(_baseDirectory, name);
+
+					if(!_allowParentTraversal && !Path.GetFullPath(name).StartsWith(_baseDirectory, StringComparison.InvariantCultureIgnoreCase))
+					{
+						throw new InvalidNameException("Parent traversal in paths is not allowed");
+					}
 				}
 			} else {
 				name = string.Empty;
@@ -216,6 +228,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		#region Instance Fields
 		string _baseDirectory;
 		bool _trimIncomingPaths;
+		private bool _allowParentTraversal;
 		char _replacementChar = '_';
 		#endregion
 
