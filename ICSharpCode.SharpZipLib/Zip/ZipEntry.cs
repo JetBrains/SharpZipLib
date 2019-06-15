@@ -471,7 +471,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 
 			set {
-				versionMadeBy &= 0xff;
+				versionMadeBy &= 0x00ff;
 				versionMadeBy |= (ushort)((value & 0xff) << 8);
 			}
 		}
