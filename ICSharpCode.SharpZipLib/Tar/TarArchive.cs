@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using ICSharpCode.SharpZipLib.Utils;
 
 namespace ICSharpCode.SharpZipLib.Tar
 {
@@ -493,8 +494,11 @@ namespace ICSharpCode.SharpZipLib.Tar
 					break;
 				}
 
-				if (entry.TarHeader.TypeFlag == TarHeader.LF_LINK || entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
+				if (entry.TarHeader.TypeFlag == TarHeader.LF_LINK)
+				{
+					OnProgressMessageEvent(entry, "Can not extract link");
 					continue;
+				}
 
 				ExtractEntry(destinationDirectory, entry);
 			}
@@ -525,6 +529,12 @@ namespace ICSharpCode.SharpZipLib.Tar
 			name = name.Replace('/', Path.DirectorySeparatorChar);
 
 			string destFile = Path.Combine(destDir, name);
+			
+			if (entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
+			{
+				ExtractSymlink(entry, destFile);
+				return;
+			}
 
 			if (entry.IsDirectory) {
 				EnsureDirectoryExists(destFile);
@@ -585,6 +595,31 @@ namespace ICSharpCode.SharpZipLib.Tar
 						outputStream.Close();
 					}
 				}
+			}
+		}
+
+		private void ExtractSymlink(TarEntry entry, string destFile)
+		{
+			if (platform != PlatformID.Unix && platform != PlatformID.MacOSX)
+			{
+				OnProgressMessageEvent(entry, "Can not create symlink: not implemented under Windows");
+				return;
+			}
+			
+			var linkName = entry.TarHeader.LinkName.Replace('/', Path.DirectorySeparatorChar);
+			if (string.IsNullOrEmpty(linkName))
+			{
+				OnProgressMessageEvent(entry, "LinkName field is empty");
+				return;
+			}
+
+			// Assume we are working with relative symlinks in the archive
+			var linkFile = Path.Combine(Path.GetDirectoryName(destFile) ?? destFile, linkName);
+			var symlinkCreationResult = Interop.symlink(linkFile, destFile);
+			if (symlinkCreationResult == -1)
+			{
+				var message = $"Can not create symlink \"{destFile}\" -> \"{linkFile}\"";
+				OnProgressMessageEvent(entry, message);
 			}
 		}
 
@@ -825,6 +860,8 @@ namespace ICSharpCode.SharpZipLib.Tar
 		TarInputStream tarIn;
 		TarOutputStream tarOut;
 		bool isDisposed;
+		
+		readonly PlatformID platform = Environment.OSVersion.Platform;
 		#endregion
 	}
 }
