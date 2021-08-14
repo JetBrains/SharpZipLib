@@ -623,8 +623,11 @@ namespace ICSharpCode.SharpZipLib.Tar
 					break;
 				}
 
-				if (entry.TarHeader.TypeFlag == TarHeader.LF_LINK || entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
+				if (entry.TarHeader.TypeFlag == TarHeader.LF_LINK)
+				{
+					OnProgressMessageEvent(entry, "Can not extract link");
 					continue;
+				}
 
 				ExtractEntry(fullDistDir, entry, allowParentTraversal);
 			}
@@ -658,6 +661,12 @@ namespace ICSharpCode.SharpZipLib.Tar
 
 			string destFile = Path.Combine(destDir, name);
 			var destFileDir = Path.GetDirectoryName(Path.GetFullPath(destFile)) ?? "";
+
+			if (entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
+			{
+				ExtractSymlink(entry, destFile);
+				return;
+			}
 
 			var isRootDir = entry.IsDirectory && entry.Name == "";
 
@@ -746,6 +755,31 @@ namespace ICSharpCode.SharpZipLib.Tar
 			{
 				// No translation required.
 				tarIn.CopyEntryContents(outputStream);
+			}
+		}
+		
+		private void ExtractSymlink(TarEntry entry, string destFile)
+		{
+			if (platform != PlatformID.Unix && platform != PlatformID.MacOSX)
+			{
+				OnProgressMessageEvent(entry, "Can not create symlink: not implemented under Windows");
+				return;
+			}
+			
+			var linkName = entry.TarHeader.LinkName.Replace('/', Path.DirectorySeparatorChar);
+			if (string.IsNullOrEmpty(linkName))
+			{
+				OnProgressMessageEvent(entry, "LinkName field is empty");
+				return;
+			}
+
+			// Assume we are working with relative symlinks in the archive
+			var linkFile = Path.Combine(Path.GetDirectoryName(destFile) ?? destFile, linkName);
+			var symlinkCreationResult = Interop.symlink(linkFile, destFile);
+			if (symlinkCreationResult == -1)
+			{
+				var message = $"Can not create symlink \"{destFile}\" -> \"{linkFile}\"";
+				OnProgressMessageEvent(entry, message);
 			}
 		}
 
@@ -1024,6 +1058,7 @@ namespace ICSharpCode.SharpZipLib.Tar
 		private TarOutputStream tarOut;
 		private bool isDisposed;
 
+		private static readonly PlatformID platform = Environment.OSVersion.Platform;
 		#endregion Instance Fields
 	}
 }
