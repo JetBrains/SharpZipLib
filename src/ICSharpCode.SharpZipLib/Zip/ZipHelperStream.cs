@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using ICSharpCode.SharpZipLib.Core;
 
 namespace ICSharpCode.SharpZipLib.Zip
 {
@@ -336,8 +337,9 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			// First shot at exactly the minimum-block-size (for example, when looking for ZIP end-central-directory, this would be the hit if there're no zip comments)
 			stream.Seek(pos, SeekOrigin.Begin);
-			if(stream.Read(cachebuffer, 0, 4 /* ensured it'd fit*/) < 4)
+			if(StreamUtils.ReadRequestedBytes(stream, cachebuffer, 0, 4 /* ensured it'd fit*/) < 4)
 				return -1; // Out of stream
+
 			fixed(byte* pBuffer = cachebuffer)
 			{
 				if(*(int*)pBuffer == signature)
@@ -356,7 +358,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				pos = 0;
 			}
 			stream.Seek(pos, SeekOrigin.Begin);
-			buflen = stream.Read(cachebuffer, 0, buflen);
+			buflen = StreamUtils.ReadRequestedBytes(stream, cachebuffer, 0, buflen);
 			fixed(byte* pBuffer = cachebuffer)
 			{
 				for(int a = buflen - 4; a-- > 0;)

@@ -3381,7 +3381,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		unsafe ushort ReadLEUshort()
 		{
 			byte[] buffer = GetBuffer();
-			if(baseStream_.Read(buffer, 0, sizeof(ushort)) < sizeof(ushort))
+			if(StreamUtils.ReadRequestedBytes(baseStream_, buffer, 0, sizeof(ushort)) < sizeof(ushort))
 				throw new EndOfStreamException("End of stream.");
 			fixed(byte* pBuffer = buffer)
 				return *(ushort*)pBuffer;
@@ -3400,7 +3400,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		unsafe uint ReadLEUint()
 		{
 			byte[] buffer = GetBuffer();
-			if(baseStream_.Read(buffer, 0, sizeof(uint)) < sizeof(uint))
+			if(StreamUtils.ReadRequestedBytes(baseStream_, buffer, 0, sizeof(uint)) < sizeof(uint))
 				throw new EndOfStreamException("End of stream.");
 			fixed(byte* pBuffer = buffer)
 				return *(uint*)pBuffer;
@@ -3409,7 +3409,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		unsafe ulong ReadLEUlong()
 		{
 			byte[] buffer = GetBuffer();
-			if(baseStream_.Read(buffer, 0, sizeof(ulong)) < sizeof(ulong))
+			if(StreamUtils.ReadRequestedBytes(baseStream_, buffer, 0, sizeof(ulong)) < sizeof(ulong))
 				throw new EndOfStreamException("End of stream.");
 			fixed(byte* pBuffer = buffer)
 				return *(ulong*)pBuffer;
@@ -3481,7 +3481,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 
 			// Read end of central directory record
-			if(baseStream_.Read(cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
+			if(StreamUtils.ReadRequestedBytes(baseStream_, cachebuffer, 0, sizeof(CentralDirectoryRecord)) < sizeof(CentralDirectoryRecord))
 				throw new EndOfStreamException("End of stream encountered while reading the central directory record."); // Not expecting this really because the search of this record takes its base size into account
 			CentralDirectoryRecord cdr;
 			fixed(byte* pCache = cachebuffer)
@@ -3597,7 +3597,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			for (ulong i = 0; i < entriesForThisDisk; i++)
 			{
-				if(baseStream_.Read(cachebuffer, 0, sizeof(EntryRecord)) < sizeof(EntryRecord))
+				if(StreamUtils.ReadRequestedBytes(baseStream_, cachebuffer, 0, sizeof(EntryRecord)) < sizeof(EntryRecord))
 					throw new EndOfStreamException($"End of stream encountered while reading the entry record for entry #{i:N0}.");
 				EntryRecord entryrecord;
 				fixed(byte* pCache = cachebuffer)
