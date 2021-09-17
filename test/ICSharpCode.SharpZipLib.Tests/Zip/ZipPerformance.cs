@@ -64,7 +64,13 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 			var sourcerepo = new PriorityPackageRepository(MachineCache.Default, new PackageSourceProvider(Settings.LoadDefaultSettings(new PhysicalFileSystem("C:\\"), null, null)).CreateAggregateRepository(PackageRepositoryFactory.Default, true));
 
 			// Just headers, no content dloaded yet (not much, at least)
-			List<IPackage> ipackages = LargePackageIds.Select(pkgid => sourcerepo.FindPackage(pkgid.Id, pkgid.Version)).ToList();
+			List<IPackage> ipackages = LargePackageIds.Select(pkgid =>
+				{
+					var package = sourcerepo.FindPackage(pkgid.Id, pkgid.Version);
+					if (package == null)
+						throw new Exception($"Failed to find package {pkgid.Id}.{pkgid.Version}");
+					return package;
+				}).ToList();
 
 			// Get the ZIPs
 			List<MemoryStream> zips = ipackages.Select(ipkg =>
