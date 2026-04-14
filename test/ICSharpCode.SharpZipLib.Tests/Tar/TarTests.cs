@@ -214,6 +214,31 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 				Assert.AreEqual(nextEntry.Name, name, "Name match failure");
 			}
 		}
+		
+		private void TryLongLink(string name, string linkName)
+		{
+			var ms = new MemoryStream();
+			using (TarOutputStream tarOut = new TarOutputStream(ms, null))
+			{
+				DateTime modTime = DateTime.Now;
+
+				TarEntry entry = TarEntry.CreateTarEntry(name);
+				entry.TarHeader.LinkName = linkName;
+				tarOut.PutNextEntry(entry);
+			}
+
+			var ms2 = new MemoryStream();
+			ms2.Write(ms.GetBuffer(), 0, ms.GetBuffer().Length);
+			ms2.Seek(0, SeekOrigin.Begin);
+
+			using (TarInputStream tarIn = new TarInputStream(ms2, null))
+			{
+				TarEntry nextEntry = tarIn.GetNextEntry();
+
+				Assert.AreEqual(nextEntry.Name, name, "Name match failure");
+				Assert.AreEqual(nextEntry.TarHeader.LinkName, linkName, "Link name match failure");
+			}
+		}
 
 		/// <summary>
 		/// Check that long names are handled correctly for reading and writing.
@@ -253,6 +278,68 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 				string format = "{0," + n + "}";
 				string formatted = string.Format(format, "A");
 				TryLongName(formatted);
+			}
+		}
+		
+		/// <summary>
+		/// Check that long names are handled correctly for reading and writing.
+		/// </summary>
+		[Test]
+		[Category("Tar")]
+		public void LongLinks()
+		{
+			TryLongLink("short_name",
+				"11111111112222222222333333333344444444445555555555" +
+			            "6666666666777777777788888888889999999999000000000");
+
+			TryLongLink("11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000",
+				"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000");
+
+			TryLongLink("11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "1", "short_link");
+
+			TryLongLink("11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000",
+				"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000" +
+						"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000");
+
+			TryLongLink("11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000" +
+			            "11111111112222222222333333333344444444445555555555" +
+			            "66666666667777777777888888888899999999990000000000",
+				"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000" +
+						"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000" +
+						"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000" +
+						"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000" +
+						"11111111112222222222333333333344444444445555555555" +
+						"66666666667777777777888888888899999999990000000000");
+
+			int maxLen = 1024;
+			for (int n = 1; n < maxLen; ++n)
+			{
+				string nameFormat = $"{{0,{n}}}";
+				string linkFormat = $"{{0,{maxLen - n}}}";
+
+				string name = string.Format(nameFormat, "A");
+				string link = string.Format(linkFormat, "A");
+				TryLongLink(name, link);
 			}
 		}
 
@@ -897,6 +984,46 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 					Assert.AreEqual(data.Length, bytesread);
 				}
 				File.WriteAllBytes(Path.Combine(Path.GetTempPath(), $"jpnametest_{length}_{encodingName}.tar"), memoryStream.ToArray());
+			}
+		}
+		
+		[Test]
+		[Category("Tar")]
+		public void LongLinksAndLongNamesExtractionTest()
+		{
+			var input64 = @"H4sIAAAAAAAAA+3azW6CQBQFYNZ9CrpvYH4YZttlk7rqCxhsaWOLkCBNmz59RyxWRUELXKScb4NR
+							ooTLnBkuBkEbXKsKM7RWqy3Xim1vCxZX3NeCc7F6X2imuWWrym9tyfsyC1Lbtl7DbJYG83h5ZL+6
+							zwfKcR33dpLEL5N5/NbRb6wK7HteUe/9LRPM37kWGOe+2dj3HR3PjqL+aZJkVfvVfT5Qs2bcxwbc
+							LFxmTvb5H8/rULQS/4EbJ+kiiKZxsAinkUmTaWTipCjtOv/16fmvtDBxYQuKixP533/+c7af/0qb
+							+k86Op4dI8//lsZ/05Ha92kYLYr6n7H+Z1KZ/aSnJMP6n8Il5L9kqrz+58h/ChTj/4T8b3Qb0fc5
+							HDKK+p/V/2Hr/BcS+U/hIvJfHuj/KOQ/BYrx33X+5w2HvPXw04bYbj5AJYr6n9P/4UqY/PeFZ9Z/
+							gqI/iPzvP//5gfW/QP5ToBj/Xec/HiP8HUX98/Hve8fzn/ub/o8nxWb9zyhOwMjz/y6MouTG/kjS
+							6On6qu+jAWqXMP8L7pWf/2g8/6fgmAvAwfQ9Wpcw/qUsjX+fSaz/KVCs/7oOkN/+T+mvJ1CDov7n
+							9H/y/r/SnJv5X1BMTiNf/7dU/6+qAVd//yc29V+9ZtJcLwz3fxQezLRmP8+jEPd+AAAAAAAAAAAA
+							AAAAAAAAAIP0DYMqWBEAUAAA";
+
+			var buffer = Convert.FromBase64String(input64);
+
+			using var ms = new MemoryStream(buffer);
+			using var gzip = new GZipInputStream(ms);
+			using var tis = new TarInputStream(gzip, null);
+			
+			CheckEntry(tis.GetNextEntry(), true , "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/", "");
+			CheckEntry(tis.GetNextEntry(), false, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/normal_name_long_link.txt", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/test.txt");
+			CheckEntry(tis.GetNextEntry(), true , "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/", "");
+			CheckEntry(tis.GetNextEntry(), true , "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/", "");
+			CheckEntry(tis.GetNextEntry(), false, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/long_name_normal_link.txt", "test.txt");
+			CheckEntry(tis.GetNextEntry(), false, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/test.txt", "");
+			CheckEntry(tis.GetNextEntry(), false, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/long_name_long_link.txt", "../../bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/test.txt");
+			CheckEntry(tis.GetNextEntry(), false, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/z.txt", "");
+			Assert.IsNull(tis.GetNextEntry(), "The last entry should be null");
+
+			void CheckEntry(TarEntry e, bool isDirectory, string expectedName, string expectedLinkName)
+			{
+				Assert.IsNotNull(e);
+				Assert.AreEqual(isDirectory, e.IsDirectory);
+				Assert.AreEqual(expectedName, e.Name);
+				Assert.AreEqual(expectedLinkName, e.TarHeader.LinkName);
 			}
 		}
 	}

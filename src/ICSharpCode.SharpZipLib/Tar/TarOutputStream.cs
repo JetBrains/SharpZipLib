@@ -304,6 +304,35 @@ namespace ICSharpCode.SharpZipLib.Tar
 					buffer.WriteBlock(blockBuffer);
 				}
 			}
+			
+			var linklen = nameEncoding != null ? nameEncoding.GetByteCount(entry.TarHeader.LinkName) : entry.TarHeader.LinkName.Length;
+
+			if (linklen > TarHeader.NAMELEN)
+			{
+				var longHeader = new TarHeader();
+				longHeader.TypeFlag = TarHeader.LF_GNU_LONGLINK;
+				longHeader.Name = longHeader.Name + "././@LongLink";
+				longHeader.Mode = 420;//644 by default
+				longHeader.UserId = entry.UserId;
+				longHeader.GroupId = entry.GroupId;
+				longHeader.GroupName = entry.GroupName;
+				longHeader.UserName = entry.UserName;
+				longHeader.LinkName = "";
+				longHeader.Size = linklen + 1;  // Plus one to avoid dropping last char
+
+				longHeader.WriteHeader(blockBuffer, nameEncoding);
+				buffer.WriteBlock(blockBuffer);  // Add special long filename header block
+
+				int linkCharIndex = 0;
+
+				while (linkCharIndex < linklen + 1 /* we've allocated one for the null char, now we must make sure it gets written out */)
+				{
+					Array.Clear(blockBuffer, 0, blockBuffer.Length);
+					TarHeader.GetAsciiBytes(entry.TarHeader.LinkName, linkCharIndex, this.blockBuffer, 0, TarBuffer.BlockSize, nameEncoding); // This func handles OK the extra char out of string length
+					linkCharIndex += TarBuffer.BlockSize;
+					buffer.WriteBlock(blockBuffer);
+				}
+			}
 
 			entry.WriteEntryHeader(blockBuffer, nameEncoding);
 			buffer.WriteBlock(blockBuffer);
