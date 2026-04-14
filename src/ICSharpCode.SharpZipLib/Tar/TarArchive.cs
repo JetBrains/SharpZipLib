@@ -663,12 +663,6 @@ namespace ICSharpCode.SharpZipLib.Tar
 			string destFile = Path.Combine(destDir, name);
 			var destFileDir = Path.GetDirectoryName(Path.GetFullPath(destFile)) ?? "";
 
-			if (entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
-			{
-				ExtractSymlink(entry, destFile);
-				return;
-			}
-
 			if (!allowParentTraversal && !destFileDir.StartsWith(destDir, StringComparison.InvariantCultureIgnoreCase))
 			{
 				throw new InvalidNameException("Parent traversal in paths is not allowed");
@@ -677,6 +671,10 @@ namespace ICSharpCode.SharpZipLib.Tar
 			if (entry.IsDirectory)
 			{
 				EnsureDirectoryExists(destFile);
+			}
+			else if (entry.TarHeader.TypeFlag == TarHeader.LF_SYMLINK)
+			{
+				ExtractSymlink(entry, destFile);
 			}
 			else
 			{
@@ -771,13 +769,11 @@ namespace ICSharpCode.SharpZipLib.Tar
 				OnProgressMessageEvent(entry, "LinkName field is empty");
 				return;
 			}
-
-			// Assume we are working with relative symlinks in the archive
-			var linkFile = Path.Combine(Path.GetDirectoryName(destFile) ?? destFile, linkName);
-			var symlinkCreationResult = Interop.symlink(linkFile, destFile);
+			
+			var symlinkCreationResult = Interop.symlink(linkName, destFile);
 			if (symlinkCreationResult == -1)
 			{
-				var message = $"Can not create symlink \"{destFile}\" -> \"{linkFile}\"";
+				var message = $"Can not create symlink \"{destFile}\" -> \"{linkName}\"";
 				OnProgressMessageEvent(entry, message);
 			}
 		}
