@@ -486,31 +486,32 @@ namespace ICSharpCode.SharpZipLib.Tar
 					this.entrySize = header.Size;
 
 					StringBuilder longName = null;
+					StringBuilder longLink = null;
 
-					if (header.TypeFlag == TarHeader.LF_GNU_LONGNAME)
+					// Loop to handle LF_GNU_LONGNAME and LF_GNU_LONGLINK entries that may appear
+					// in any order before the actual file entry.
+					while (header.TypeFlag == TarHeader.LF_GNU_LONGNAME || header.TypeFlag == TarHeader.LF_GNU_LONGLINK)
 					{
-						byte[] nameBuffer = new byte[TarBuffer.BlockSize];
-						long numToRead = this.entrySize;
-
-						longName = new StringBuilder();
-
-						while (numToRead > 0)
-						{
-							int numRead = this.Read(nameBuffer, 0, (numToRead > nameBuffer.Length ? nameBuffer.Length : (int)numToRead));
-
-							if (numRead == -1)
-							{
-								throw new InvalidHeaderException("Failed to read long name entry");
-							}
-
-							longName.Append(TarHeader.ParseName(nameBuffer, 0, numRead, encoding).ToString());
-							numToRead -= numRead;
-						}
+						if (header.TypeFlag == TarHeader.LF_GNU_LONGNAME)
+							longName = ReadStringFromBody();
+						else
+							longLink = ReadStringFromBody();
 
 						SkipToNextEntry();
 						headerBuf = this.tarBuffer.ReadBlock();
+						if (headerBuf == null)
+							throw new TarException("Unexpected EOF. At least one entry should follow the LF_GNU_LONGNAME or LF_GNU_LONGLINK entry.");
+						header = new TarHeader();
+						header.ParseBuffer(headerBuf, encoding);
+						
+						if (!header.IsChecksumValid)
+							throw new TarException("Header checksum is invalid");
+
+						this.entryOffset = 0;
+						this.entrySize = header.Size;
 					}
-					else if (header.TypeFlag == TarHeader.LF_GHDR)
+
+					if (header.TypeFlag == TarHeader.LF_GHDR)
 					{  // POSIX global extended header
 					   // Ignore things we dont understand completely for now
 						SkipToNextEntry();
@@ -566,7 +567,22 @@ namespace ICSharpCode.SharpZipLib.Tar
 						currentEntry = new TarEntry(headerBuf, encoding);
 						if (longName != null)
 						{
-							currentEntry.Name = longName.ToString();
+							var longNameStr = longName.ToString();
+							
+							if (longNameStr.StartsWith(currentEntry.Name ?? string.Empty))
+								currentEntry.Name = longNameStr;
+							else
+								throw new InvalidHeaderException("The entry name is not a prefix of the long name");
+						}
+
+						if (longLink != null)
+						{
+							var longLinkStr = longLink.ToString();
+							
+							if (longLinkStr.StartsWith(currentEntry.TarHeader.LinkName ?? string.Empty))
+								currentEntry.TarHeader.LinkName = longLinkStr;
+							else
+								throw new InvalidHeaderException("The entry link name is not a prefix of the long link");
 						}
 					}
 					else
@@ -593,6 +609,29 @@ namespace ICSharpCode.SharpZipLib.Tar
 				}
 			}
 			return currentEntry;
+		}
+
+		private StringBuilder ReadStringFromBody()
+		{
+			byte[] nameBuffer = new byte[TarBuffer.BlockSize];
+			long numToRead = this.entrySize;
+
+			var name = new StringBuilder();
+
+			while (numToRead > 0)
+			{
+				int numRead = Read(nameBuffer, 0, (numToRead > nameBuffer.Length ? nameBuffer.Length : (int)numToRead));
+
+				if (numRead == -1)
+				{
+					throw new InvalidHeaderException("Failed to read long name entry");
+				}
+
+				name.Append(TarHeader.ParseName(nameBuffer, 0, numRead, encoding).ToString());
+				numToRead -= numRead;
+			}
+
+			return name;
 		}
 
 		/// <summary>
