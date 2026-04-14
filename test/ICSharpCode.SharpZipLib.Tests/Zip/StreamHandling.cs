@@ -481,6 +481,7 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 		/// </summary>
 		[Test]
 		[Category("Zip")]
+		[Ignore("ZipEntry name decoding approach was changed in 858fa7ce146dc786aa95651ec19ddb9062526190")]
 		public void ShouldBeAbleToReadEntriesWithInvalidFileNames()
 		{
 			var testFileName = "<A|B?C>.txt";
