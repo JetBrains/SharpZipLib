@@ -211,14 +211,14 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 			{
 				TarEntry nextEntry = tarIn.GetNextEntry();
 
-				Assert.AreEqual(nextEntry.Name, name, "Name match failure");
+				Assert.AreEqual(name, nextEntry.Name, "Name match failure");
 			}
 		}
 		
 		private void TryLongLink(string name, string linkName)
 		{
 			var ms = new MemoryStream();
-			using (TarOutputStream tarOut = new TarOutputStream(ms, null))
+			using (TarOutputStream tarOut = new TarOutputStream(ms, Encoding.UTF8))
 			{
 				DateTime modTime = DateTime.Now;
 
@@ -231,12 +231,12 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 			ms2.Write(ms.GetBuffer(), 0, ms.GetBuffer().Length);
 			ms2.Seek(0, SeekOrigin.Begin);
 
-			using (TarInputStream tarIn = new TarInputStream(ms2, null))
+			using (TarInputStream tarIn = new TarInputStream(ms2, Encoding.UTF8))
 			{
 				TarEntry nextEntry = tarIn.GetNextEntry();
 
-				Assert.AreEqual(nextEntry.Name, name, "Name match failure");
-				Assert.AreEqual(nextEntry.TarHeader.LinkName, linkName, "Link name match failure");
+				Assert.AreEqual(name, nextEntry.Name, "Name match failure");
+				Assert.AreEqual(linkName, nextEntry.TarHeader.LinkName, "Link name match failure");
 			}
 		}
 
@@ -288,9 +288,12 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 		[Category("Tar")]
 		public void LongLinks()
 		{
+			TryLongLink("/яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+				"/яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя");
+			
 			TryLongLink("short_name",
 				"11111111112222222222333333333344444444445555555555" +
-			            "6666666666777777777788888888889999999999000000000");
+				"6666666666777777777788888888889999999999000000000");
 
 			TryLongLink("11111111112222222222333333333344444444445555555555" +
 			            "66666666667777777777888888888899999999990000000000",
