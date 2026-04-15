@@ -566,24 +566,10 @@ namespace ICSharpCode.SharpZipLib.Tar
 					{
 						currentEntry = new TarEntry(headerBuf, encoding);
 						if (longName != null)
-						{
-							var longNameStr = longName.ToString();
-							
-							if (longNameStr.StartsWith(currentEntry.Name ?? string.Empty))
-								currentEntry.Name = longNameStr;
-							else
-								throw new InvalidHeaderException("The entry name is not a prefix of the long name");
-						}
+							currentEntry.TarHeader.Name = longName.ToString();
 
 						if (longLink != null)
-						{
-							var longLinkStr = longLink.ToString();
-							
-							if (longLinkStr.StartsWith(currentEntry.TarHeader.LinkName ?? string.Empty))
-								currentEntry.TarHeader.LinkName = longLinkStr;
-							else
-								throw new InvalidHeaderException("The entry link name is not a prefix of the long link");
-						}
+							currentEntry.TarHeader.LinkName = longLink.ToString();
 					}
 					else
 					{
