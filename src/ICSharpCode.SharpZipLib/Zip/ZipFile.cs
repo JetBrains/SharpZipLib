@@ -3593,6 +3593,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			baseStream_.Seek(offsetOfFirstEntry + offsetOfCentralDir, SeekOrigin.Begin);
 
+			// Reused across entries: name/comment decode scratch; avoids a per-entry byte[] allocation while
+			// scanning the central directory (the bulk archive-open hot path). Grows on demand, never shrinks.
+			byte[] buffer = null;
+
 			for (ulong i = 0; i < entriesForThisDisk; i++)
 			{
 				if (ReadLEUint() != ZipConstants.CentralHeaderSignature)
@@ -3621,7 +3625,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 				uint externalAttributes = ReadLEUint();
 				long offset = ReadLEUint();
 
-				byte[] buffer = new byte[Math.Max(nameLen, commentLen)];
+				int textLen = Math.Max(nameLen, commentLen);
+				if (buffer == null || buffer.Length < textLen)
+				{
+					buffer = new byte[Math.Max(textLen, 256)];
+				}
 				var entryEncoding = _stringCodec.ZipInputEncoding(bitFlags);
 
 				StreamUtils.ReadFully(baseStream_, buffer, 0, nameLen);
