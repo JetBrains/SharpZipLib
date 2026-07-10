@@ -771,6 +771,18 @@ namespace ICSharpCode.SharpZipLib.Zip
 			set => _inflaterSource = value ?? Compression.DefaultInflaterSource.Default;
 		}
 
+		/// <summary>
+		/// Gets or sets the <see cref="Compression.IDeflaterSource"/> used to compress entries
+		/// written via <see cref="CommitUpdate()"/>. Defaults to a fresh managed Deflater; assign
+		/// <see cref="Compression.PooledDeflaterSource.Shared"/> or
+		/// <see cref="Compression.SystemDeflaterSource.Default"/> to pool or use the native codec.
+		/// </summary>
+		public Compression.IDeflaterSource DeflaterSource
+		{
+			get => _deflaterSource;
+			set => _deflaterSource = value ?? Compression.DefaultDeflaterSource.Default;
+		}
+
 		#endregion Properties
 
 		#region Input Handling
@@ -2699,13 +2711,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 					break;
 
 				case CompressionMethod.Deflated:
-					var dos = new DeflaterOutputStream(result, new Deflater(9, true))
-					{
-						// If there is an encryption stream in use, then we want that to be disposed when the deflator stream is disposed
-						// If not, then we don't want it to dispose the base stream
-						IsStreamOwner = entry.IsCrypted
-					};
-					result = dos;
+					// Encrypted entries: dispose the (encryption) base stream with the compressor; otherwise leave it open.
+					result = _deflaterSource.CreateCompressor(result, 9, leaveOpen: !entry.IsCrypted);
 					break;
 
 				case CompressionMethod.BZip2:
@@ -3839,6 +3846,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private StringCodec _stringCodec = ZipStrings.GetStringCodec();
 
 		private Compression.IInflaterSource _inflaterSource = Compression.DefaultInflaterSource.Default;
+
+		private Compression.IDeflaterSource _deflaterSource = Compression.DefaultDeflaterSource.Default;
 
 		// Default is dynamic which is not backwards compatible and can cause problems
 		// with XP's built in compression which cant read Zip64 archives.
