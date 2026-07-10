@@ -1550,6 +1550,13 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			updateIndex_ = new Dictionary<string, int>();
 
+			// Materialise any lazily-loaded extra data now, while baseStream_ is still the intact
+			// source; the update path copies/writes entries and must not trigger a lazy seek mid-write.
+			foreach (ZipEntry entry in entries_)
+			{
+				var _ = entry.ExtraData;
+			}
+
 			updates_ = new List<ZipUpdate>(entries_.Length);
 			foreach (ZipEntry entry in entries_)
 			{
@@ -3645,7 +3652,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 				uint externalAttributes = U32(38);
 				long offset = U32(42);
 
-				int textLen = Math.Max(nameLen, commentLen);
+				int textLen = Math.Max(nameLen, Math.Max(extraLen, commentLen));
 				if (buffer == null || buffer.Length < textLen)
 				{
 					buffer = new byte[Math.Max(textLen, 256)];
@@ -3679,12 +3686,18 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 				if (extraLen > 0)
 				{
-					byte[] extra = new byte[extraLen];
-					StreamUtils.ReadFully(baseStream_, extra);
-					entry.ExtraData = extra;
+					// Read the extra field into the reused buffer, parse the fields we greedily need
+					// (Zip64 sizes/offset, Unix mtime) with zero allocation, and record its location so
+					// ZipEntry.ExtraData can be materialised lazily instead of a per-entry blob allocation.
+					long extraStart = baseStream_.Position;
+					StreamUtils.ReadFully(baseStream_, buffer, 0, extraLen);
+					entry.SetLazyExtraData(this, extraStart, extraLen);
+					entry.ProcessCentralExtraData(buffer, 0, extraLen);
 				}
-
-				entry.ProcessExtraData(false);
+				else
+				{
+					entry.ProcessCentralExtraData(buffer, 0, 0);
+				}
 
 				if (commentLen > 0)
 				{
@@ -3693,6 +3706,23 @@ namespace ICSharpCode.SharpZipLib.Zip
 				}
 
 				entries_[i] = entry;
+			}
+		}
+
+		// Reads an entry's central-directory extra field on demand, backing ZipEntry.ExtraData's
+		// lazy materialisation (so scanning does not allocate a blob per entry).
+		internal byte[] ReadCentralExtra(long extraOffset, int length)
+		{
+			// Lock baseStream_ (not `this`) to be mutually exclusive with PartialInputStream/GetInputStream,
+			// which also seek+read baseStream_ under lock(baseStream_); save/restore keeps their cursor intact.
+			lock (baseStream_)
+			{
+				long saved = baseStream_.Position;
+				var data = new byte[length];
+				baseStream_.Seek(extraOffset, SeekOrigin.Begin);
+				StreamUtils.ReadFully(baseStream_, data, 0, length);
+				baseStream_.Seek(saved, SeekOrigin.Begin);
+				return data;
 			}
 		}
 

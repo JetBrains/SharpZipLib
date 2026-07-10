@@ -253,10 +253,14 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			forceZip64_ = entry.forceZip64_;
 
-			if (entry.extra != null)
+			// Force any lazily-loaded extra to materialise on the source (while its ZipFile is still open),
+			// then deep-copy the bytes. The clone must NOT retain a lazy reference to the source ZipFile,
+			// which the caller may dispose independently of the clone.
+			byte[] sourceExtra = entry.ExtraData;
+			if (sourceExtra != null)
 			{
-				extra = new byte[entry.extra.Length];
-				Array.Copy(entry.extra, 0, extra, 0, entry.extra.Length);
+				extra = new byte[sourceExtra.Length];
+				Array.Copy(sourceExtra, 0, extra, 0, sourceExtra.Length);
 			}
 		}
 
@@ -756,10 +760,19 @@ namespace ICSharpCode.SharpZipLib.Zip
 		{
 			// TODO: This is slightly safer but less efficient.  Think about whether it should change.
 			//				return (byte[]) extra.Clone();
-			get => extra;
+			get
+			{
+				if (extra == null && lazyExtraLength > 0 && lazyExtraSource != null)
+				{
+					extra = lazyExtraSource.ReadCentralExtra(lazyExtraOffset, lazyExtraLength);
+				}
+
+				return extra;
+			}
 
 			set
 			{
+				lazyExtraSource = null;
 				if (value == null)
 				{
 					extra = null;
@@ -861,6 +874,109 @@ namespace ICSharpCode.SharpZipLib.Zip
 					// Entry is encrypted using AES
 					: AESOverheadSize;
 
+		// Central-directory records carry the Zip64 relative-offset field (unlike local headers), so
+		// parse with hasZip64Offset: true. Reads straight from the reused scan buffer slice, allocating
+		// neither a ZipExtraData navigator nor a retained per-entry extra blob.
+		internal void ProcessCentralExtraData(byte[] buf, int start, int length)
+			=> ApplyKnownExtraData(buf, start, length, hasZip64Offset: true);
+
+		// Interprets the extra-data fields SharpZipLib recognises — Zip64 sizes / relative-offset, the
+		// Unix (0x5455) and NTFS (0x000A) modification time, and the WinZip-AES (0x9901) real method +
+		// strength — applying them to this entry directly from a raw blob window, allocating nothing.
+		// Both header paths share it so the tag layout knowledge lives in exactly one place: the
+		// central-directory hot scan (ProcessCentralExtraData, a slice of the reused read buffer) and
+		// the local header (ProcessExtraData, the materialised extra blob). hasZip64Offset is false for
+		// local headers, which — unlike the central directory — carry no relative-offset field in their
+		// Zip64 record.
+		private void ApplyKnownExtraData(byte[] buffer, int start, int length, bool hasZip64Offset)
+		{
+			int versionBeforeAes = versionToExtract;   // Zip64 guard must use the version before AES rewrites it
+			bool expectsAes = method == CompressionMethod.WinZipAES;
+			bool aesFound = false;
+
+			var reader = new ZipExtraDataReader(buffer, start, length);
+			while (reader.TryReadRecord(out int tag, out int value, out int valueLength))
+			{
+				if (tag == 1) // Zip64 extended information
+				{
+					forceZip64_ = true;
+					// Only the fields that overflowed 32 bits are present (8 bytes each, in order); guard the
+					// declared field length so a read cannot run past it into adjacent/stale buffer bytes.
+					int need = (size == uint.MaxValue ? 8 : 0)
+						+ (compressedSize == uint.MaxValue ? 8 : 0)
+						+ (hasZip64Offset && offset == uint.MaxValue ? 8 : 0);
+					if (valueLength < need)
+					{
+						throw new ZipException("Extra data extended Zip64 information length is invalid");
+					}
+
+					int p = value;
+					if (size == uint.MaxValue)
+					{
+						size = (ulong)ZipExtraDataReader.ReadInt64(buffer, p);
+						p += 8;
+					}
+
+					if (compressedSize == uint.MaxValue)
+					{
+						compressedSize = (ulong)ZipExtraDataReader.ReadInt64(buffer, p);
+						p += 8;
+					}
+
+					if (hasZip64Offset && offset == uint.MaxValue)
+					{
+						offset = ZipExtraDataReader.ReadInt64(buffer, p);
+					}
+				}
+				else if (tag == 0x5455 && valueLength >= 5) // Unix extended timestamp; bit 0 = modification time
+				{
+					if ((buffer[value] & 1) != 0)
+					{
+						int unixTime = ZipExtraDataReader.ReadInt32(buffer, value + 1);
+						DateTime = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc) + TimeSpan.FromSeconds(unixTime);
+					}
+				}
+#if RESPECT_NT_TIMESTAMP
+				else if (tag == 0x000A && valueLength >= 16) // NTFS extra: reserved(4)+subtag(2)+subsize(2)+mtime(8, FILETIME)
+				{
+					DateTime = DateTime.FromFileTimeUtc(ZipExtraDataReader.ReadInt64(buffer, value + 8));
+				}
+#endif
+				else if (tag == 0x9901) // WinZip AES: real compression method + strength (winzip.com/aes_info.htm)
+				{
+					if (valueLength < 7)
+					{
+						throw new ZipException("AES Extra Data Length " + valueLength + " invalid.");
+					}
+
+					versionToExtract = ZipConstants.VERSION_AES;
+					_aesVer = ZipExtraDataReader.ReadUInt16(buffer, value);
+					_aesEncryptionStrength = buffer[value + 4];
+					method = (CompressionMethod)ZipExtraDataReader.ReadUInt16(buffer, value + 5);
+					aesFound = true;
+				}
+			}
+
+			if (!forceZip64_ &&
+				((versionBeforeAes & 0xff) >= ZipConstants.VersionZip64) &&
+				((size == uint.MaxValue) || (compressedSize == uint.MaxValue)))
+			{
+				throw new ZipException("Zip64 Extended information required but is missing.");
+			}
+
+			if (expectsAes && !aesFound)
+			{
+				throw new ZipException("AES Extra Data missing");
+			}
+		}
+
+		internal void SetLazyExtraData(ZipFile source, long extraOffset, int extraLength)
+		{
+			lazyExtraSource = source;
+			lazyExtraOffset = extraOffset;
+			lazyExtraLength = extraLength;
+		}
+
 		/// <summary>
 		/// Process extra data fields updating the entry based on the contents.
 		/// </summary>
@@ -869,121 +985,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </param>
 		internal void ProcessExtraData(bool localHeader)
 		{
-			var extraData = new ZipExtraData(this.extra);
-
-			if (extraData.Find(0x0001))
-			{
-				// Version required to extract is ignored here as some archivers dont set it correctly
-				// in theory it should be version 45 or higher
-
-				// The recorded size will change but remember that this is zip64.
-				forceZip64_ = true;
-
-				if (extraData.ValueLength < 4)
-				{
-					throw new ZipException("Extra data extended Zip64 information length is invalid");
-				}
-
-				// (localHeader ||) was deleted, because actually there is no specific difference with reading sizes between local header & central directory
-				// https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
-				// ...
-				// 4.4  Explanation of fields
-				// ...
-				//	4.4.8 compressed size: (4 bytes)
-				//	4.4.9 uncompressed size: (4 bytes)
-				//
-				//		The size of the file compressed (4.4.8) and uncompressed,
-				//		(4.4.9) respectively.  When a decryption header is present it
-				//		will be placed in front of the file data and the value of the
-				//		compressed file size will include the bytes of the decryption
-				//		header.  If bit 3 of the general purpose bit flag is set,
-				//		these fields are set to zero in the local header and the
-				//		correct values are put in the data descriptor and
-				//		in the central directory.  If an archive is in ZIP64 format
-				//		and the value in this field is 0xFFFFFFFF, the size will be
-				//		in the corresponding 8 byte ZIP64 extended information
-				//		extra field.  When encrypting the central directory, if the
-				//		local header is not in ZIP64 format and general purpose bit
-				//		flag 13 is set indicating masking, the value stored for the
-				//		uncompressed size in the Local Header will be zero.
-				//
-				// Otherwise there is problem with minizip implementation
-				if (size == uint.MaxValue)
-				{
-					size = (ulong)extraData.ReadLong();
-				}
-
-				if (compressedSize == uint.MaxValue)
-				{
-					compressedSize = (ulong)extraData.ReadLong();
-				}
-
-				if (!localHeader && (offset == uint.MaxValue))
-				{
-					offset = extraData.ReadLong();
-				}
-
-				// Disk number on which file starts is ignored
-			}
-			else
-			{
-				if (
-					((versionToExtract & 0xff) >= ZipConstants.VersionZip64) &&
-					((size == uint.MaxValue) || (compressedSize == uint.MaxValue))
-				)
-				{
-					throw new ZipException("Zip64 Extended information required but is missing.");
-				}
-			}
-
-			DateTime = GetDateTime(extraData) ?? DateTime;
-			if (method == CompressionMethod.WinZipAES)
-			{
-				ProcessAESExtraData(extraData);
-			}
-		}
-
-		private static DateTime? GetDateTime(ZipExtraData extraData)
-		{
-			// Check for NT timestamp
-			// NOTE: Disable by default to match behavior of InfoZIP
-#if RESPECT_NT_TIMESTAMP
-			NTTaggedData ntData = extraData.GetData<NTTaggedData>();
-			if (ntData != null)
-				return ntData.LastModificationTime;
-#endif
-
-			// Check for Unix timestamp
-			ExtendedUnixData unixData = extraData.GetData<ExtendedUnixData>();
-			if (unixData != null && unixData.Include.HasFlag(ExtendedUnixData.Flags.ModificationTime))
-				return unixData.ModificationTime;
-
-			return null;
-		}
-
-		// For AES the method in the entry is 99, and the real compression method is in the extradata
-		private void ProcessAESExtraData(ZipExtraData extraData)
-		{
-			if (extraData.Find(0x9901))
-			{
-				// Set version for Zipfile.CreateAndInitDecryptionStream
-				versionToExtract = ZipConstants.VERSION_AES;            // Ver 5.1 = AES see "Version" getter
-
-				//
-				// Unpack AES extra data field see http://www.winzip.com/aes_info.htm
-				int length = extraData.ValueLength;         // Data size currently 7
-				if (length < 7)
-					throw new ZipException("AES Extra Data Length " + length + " invalid.");
-				int ver = extraData.ReadShort();            // Version number (1=AE-1 2=AE-2)
-				int vendorId = extraData.ReadShort();       // 2-character vendor ID 0x4541 = "AE"
-				int encrStrength = extraData.ReadByte();    // encryption strength 1 = 128 2 = 192 3 = 256
-				int actualCompress = extraData.ReadShort(); // The actual compression method used to compress the file
-				_aesVer = ver;
-				_aesEncryptionStrength = encrStrength;
-				method = (CompressionMethod)actualCompress;
-			}
-			else
-				throw new ZipException("AES Extra Data missing");
+			// Local headers carry no Zip64 relative-offset field, hence hasZip64Offset: !localHeader.
+			// Parsing runs over the already-materialised extra blob but shares the tag knowledge with the
+			// central-directory scan (see ApplyKnownExtraData) and no longer allocates a ZipExtraData.
+			ApplyKnownExtraData(extra, 0, extra?.Length ?? 0, hasZip64Offset: !localHeader);
 		}
 
 		/// <summary>
@@ -1140,6 +1145,12 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		private CompressionMethod method = CompressionMethod.Deflated;
 		private byte[] extra;
+
+		// Lazy central-directory extra data: rather than allocate an extra blob per entry during a
+		// scan, ZipFile records the field's location here and ExtraData reads it on first access.
+		private ZipFile lazyExtraSource;
+		private long lazyExtraOffset;
+		private int lazyExtraLength;
 		private string comment;
 
 		private int flags;                             // general purpose bit flags

@@ -487,6 +487,79 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 	///
 	/// <summary>
+	/// Allocation-free forward reader over a raw ZIP "extra data" blob — the sequence of
+	/// little-endian TLV records (<c>2-byte tag, 2-byte length, then length value bytes</c>) that
+	/// both local-file and central-directory headers carry. It works over a
+	/// <c>(buffer, offset, count)</c> window, so a slice of a shared scan buffer can be parsed
+	/// without copying it out first. This is the library's stand-in for a span:
+	/// <see cref="System.Span{T}"/> is unavailable on netstandard2.0 without pulling in the extra
+	/// System.Memory dependency, whereas a <c>(byte[], offset, count)</c> triple is what the rest of
+	/// the library (streams, <see cref="ZipExtraData"/> itself) already speaks. Being a struct, a
+	/// reader local costs no heap allocation.
+	/// </summary>
+	/// <remarks>
+	/// This carries only the read-side framing plus field decoding shared by the header-parsing hot
+	/// paths (see <c>ZipEntry.ApplyKnownExtraData</c>). The full navigate/edit surface — <c>Find</c>,
+	/// <c>GetData&lt;T&gt;</c>, <c>AddEntry</c>, etc. — remains on the public <see cref="ZipExtraData"/>
+	/// class, which is unaffected.
+	/// </remarks>
+	internal struct ZipExtraDataReader
+	{
+		private readonly byte[] buffer;
+		private readonly int end;
+		private int position;
+
+		/// <summary>Positions a reader over the <paramref name="count"/> bytes of
+		/// <paramref name="buffer"/> starting at <paramref name="offset"/>.</summary>
+		public ZipExtraDataReader(byte[] buffer, int offset, int count)
+		{
+			this.buffer = buffer;
+			position = offset;
+			end = offset + count;
+		}
+
+		/// <summary>
+		/// Advances to the next complete record, exposing its <paramref name="tag"/> and the
+		/// <paramref name="valueStart"/> / <paramref name="valueLength"/> of its value bytes within the
+		/// underlying buffer. Returns false at end of data, on a truncated header, or when a declared
+		/// length would overrun the window — matching the historical tolerant parse, which stops at a
+		/// malformed trailing record rather than throwing.
+		/// </summary>
+		public bool TryReadRecord(out int tag, out int valueStart, out int valueLength)
+		{
+			if (position + 4 <= end)
+			{
+				int recordTag = ReadUInt16(buffer, position);
+				int recordLength = ReadUInt16(buffer, position + 2);
+				int recordValue = position + 4;
+				if (recordValue + recordLength <= end)
+				{
+					tag = recordTag;
+					valueStart = recordValue;
+					valueLength = recordLength;
+					position = recordValue + recordLength;
+					return true;
+				}
+			}
+
+			tag = valueStart = valueLength = 0;
+			return false;
+		}
+
+		/// <summary>Reads a little-endian unsigned 16-bit value at <paramref name="index"/>.</summary>
+		public static int ReadUInt16(byte[] buffer, int index)
+			=> buffer[index] | (buffer[index + 1] << 8);
+
+		/// <summary>Reads a little-endian signed 32-bit value at <paramref name="index"/>.</summary>
+		public static int ReadInt32(byte[] buffer, int index)
+			=> buffer[index] | (buffer[index + 1] << 8) | (buffer[index + 2] << 16) | (buffer[index + 3] << 24);
+
+		/// <summary>Reads a little-endian 64-bit value at <paramref name="index"/> (two uint32 halves).</summary>
+		public static long ReadInt64(byte[] buffer, int index)
+			=> (uint)ReadInt32(buffer, index) | ((long)(uint)ReadInt32(buffer, index + 4) << 32);
+	}
+
+	/// <summary>
 	/// A class to handle the extra data field for Zip entries
 	/// </summary>
 	/// <remarks>
