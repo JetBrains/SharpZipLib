@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using ICSharpCode.SharpZipLib.Zip;
 using ICSharpCode.SharpZipLib.Zip.Compression;
 
@@ -18,8 +19,10 @@ namespace ScanBench
 	{
 		private static string s_arm = "sharpzip";        // sharpzip | pooled | system
 		[ThreadStatic] private static byte[] s_readBuf;   // reused so the read buffer is not counted per-open
-		private static long s_bytes;                      // total bytes actually decompressed (correctness check)
+		private static long s_bytes;                      // total bytes actually (de)compressed (correctness check)
 		private static int s_fails;                       // ops that threw (must be 0 for a valid run)
+		private static byte[] s_payload;                  // compress scenario: representative input
+		private static long s_compressedLen;              // compress scenario: last output size (ratio)
 
 		private static int Main(string[] args)
 		{
@@ -39,20 +42,30 @@ namespace ScanBench
 			}
 
 			string[] packages;
-			if (dir != null)
+			Action<string> op;
+			if (scenario == "compress")
 			{
-				packages = Directory.GetFiles(dir, "*.nupkg", SearchOption.AllDirectories);
-				Console.WriteLine($"corpus: {packages.Length} real nupkgs under {dir}");
+				s_payload = BuildPayload();
+				packages = new string[25];          // path ignored; 25 compressions per iteration
+				op = CompressPayload;
+				Console.WriteLine($"compress payload: {s_payload.Length / 1024.0 / 1024.0:N2} MB representative text");
 			}
 			else
 			{
-				string tmp = Path.Combine(Path.GetTempPath(), "ScanBench_synth");
-				packages = SynthesizeCorpus(tmp, synth);
-				Console.WriteLine($"corpus: {packages.Length} synthesized packages under {tmp}");
+				if (dir != null)
+				{
+					packages = Directory.GetFiles(dir, "*.nupkg", SearchOption.AllDirectories);
+					Console.WriteLine($"corpus: {packages.Length} real nupkgs under {dir}");
+				}
+				else
+				{
+					string tmp = Path.Combine(Path.GetTempPath(), "ScanBench_synth");
+					packages = SynthesizeCorpus(tmp, synth);
+					Console.WriteLine($"corpus: {packages.Length} synthesized packages under {tmp}");
+				}
+				if (packages.Length == 0) { Console.Error.WriteLine("no packages found"); return 2; }
+				op = scenario == "nuspec" ? (Action<string>)ReadNuspec : ScanOpen;
 			}
-			if (packages.Length == 0) { Console.Error.WriteLine("no packages found"); return 2; }
-
-			Action<string> op = scenario == "nuspec" ? (Action<string>)ReadNuspec : ScanOpen;
 
 			Console.WriteLine($"runtime: {RuntimeInformation.FrameworkDescription}  |  scenario={scenario} arm={arm} iters={iters}");
 
@@ -75,7 +88,62 @@ namespace ScanBench
 				$"per-open={perOpenUs:N1} us  alloc/open={perOpenKb:N1} KB  totalAlloc={allocated / 1024.0 / 1024.0:N1} MB  " +
 				$"gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)}  " +
 				$"decompressed={s_bytes / 1024.0 / 1024.0:N1} MB fails={s_fails}");
+			if (scenario == "compress")
+			{
+				Console.WriteLine($"COMPRESS  payload={s_payload.Length / 1024.0 / 1024.0:N2} MB  " +
+					$"compressed={s_compressedLen / 1024.0:N0} KB  ratio={(double)s_compressedLen / s_payload.Length:P2}");
+			}
 			return 0;
+		}
+
+		// Scenario "compress": compress a fixed representative payload via the selected deflater arm.
+		private static void CompressPayload(string _)
+		{
+			IDeflaterSource src =
+				s_arm == "pooled" ? PooledDeflaterSource.Shared :
+				s_arm == "system" ? SystemDeflaterSource.Default :
+				DefaultDeflaterSource.Default;
+
+			var counter = new CountingStream();
+			using (var cs = src.CreateCompressor(counter, 9, leaveOpen: true))
+			{
+				cs.Write(s_payload, 0, s_payload.Length);
+			}
+			s_compressedLen = counter.Count;
+			s_bytes += s_payload.Length;
+		}
+
+		// ~4 MB of deterministic nuspec-like text: compressible, but not trivially so.
+		private static byte[] BuildPayload()
+		{
+			var sb = new StringBuilder(4 * 1024 * 1024 + 4096);
+			var rnd = new Random(999);
+			string[] words = { "package", "assembly", "version", "dependency", "framework", "netstandard",
+				"target", "reference", "group", "metadata", "title", "authors", "description", "copyright",
+				"tags", "namespace", "internal", "public", "class", "method", "return", "value" };
+			while (sb.Length < 4 * 1024 * 1024)
+			{
+				sb.Append("  <dependency id=\"");
+				for (int i = 0; i < 3; i++) { sb.Append(words[rnd.Next(words.Length)]); sb.Append('.'); }
+				sb.Append("\" version=\"").Append(rnd.Next(1, 20)).Append('.').Append(rnd.Next(0, 99)).Append(".0\" />\n");
+			}
+			return Encoding.UTF8.GetBytes(sb.ToString());
+		}
+
+		// Write-only stream that just counts bytes (measures compressed size without keeping it).
+		private sealed class CountingStream : Stream
+		{
+			public long Count { get; private set; }
+			public override bool CanWrite => true;
+			public override bool CanRead => false;
+			public override bool CanSeek => false;
+			public override long Length => Count;
+			public override long Position { get => Count; set => throw new NotSupportedException(); }
+			public override void Write(byte[] buffer, int offset, int count) => Count += count;
+			public override void Flush() { }
+			public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+			public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+			public override void SetLength(long value) => throw new NotSupportedException();
 		}
 
 		// Scenario "open": scan the central directory only, touch each entry name. No decompression.
