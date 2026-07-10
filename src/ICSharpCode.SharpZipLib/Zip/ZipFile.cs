@@ -3616,33 +3616,34 @@ namespace ICSharpCode.SharpZipLib.Zip
 			// scanning the central directory (the bulk archive-open hot path). Grows on demand, never shrinks.
 			byte[] buffer = null;
 
+			// Fixed 46-byte central-directory record read in one call and parsed from the buffer,
+			// instead of ~13 per-field stream reads (fewer virtual calls / bounds checks per entry).
+			var hdr = new byte[46];
+			int U16(int o) => hdr[o] | (hdr[o + 1] << 8);
+			uint U32(int o) => (uint)(hdr[o] | (hdr[o + 1] << 8) | (hdr[o + 2] << 16) | (hdr[o + 3] << 24));
+
 			for (ulong i = 0; i < entriesForThisDisk; i++)
 			{
-				if (ReadLEUint() != ZipConstants.CentralHeaderSignature)
+				StreamUtils.ReadFully(baseStream_, hdr, 0, 46);
+				if (U32(0) != ZipConstants.CentralHeaderSignature)
 				{
 					throw new ZipException("Wrong Central Directory signature");
 				}
 
-				int versionMadeBy = ReadLEUshort();
-				int versionToExtract = ReadLEUshort();
-				int bitFlags = ReadLEUshort();
-				int method = ReadLEUshort();
-				uint dostime = ReadLEUint();
-				uint crc = ReadLEUint();
-				var csize = (long)ReadLEUint();
-				var size = (long)ReadLEUint();
-				int nameLen = ReadLEUshort();
-				int extraLen = ReadLEUshort();
-				int commentLen = ReadLEUshort();
-
-				
-				// ReSharper disable once UnusedVariable, Currently unused but needs to be read to offset the stream
-				int diskStartNo = ReadLEUshort();
-				// ReSharper disable once UnusedVariable, Currently unused but needs to be read to offset the stream
-				int internalAttributes = ReadLEUshort();
-
-				uint externalAttributes = ReadLEUint();
-				long offset = ReadLEUint();
+				int versionMadeBy = U16(4);
+				int versionToExtract = U16(6);
+				int bitFlags = U16(8);
+				int method = U16(10);
+				uint dostime = U32(12);
+				uint crc = U32(16);
+				var csize = (long)U32(20);
+				var size = (long)U32(24);
+				int nameLen = U16(28);
+				int extraLen = U16(30);
+				int commentLen = U16(32);
+				// bytes 34-35 (disk start) and 36-37 (internal attributes) are present in hdr but unused here
+				uint externalAttributes = U32(38);
+				long offset = U32(42);
 
 				int textLen = Math.Max(nameLen, commentLen);
 				if (buffer == null || buffer.Length < textLen)
