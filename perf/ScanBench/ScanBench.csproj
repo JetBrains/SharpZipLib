@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Perf harness for the OPC/nupkg fast-scan-many-opens scenario (archive OPEN overhead).
+    Self-contained: measures against a directory of real *.nupkg, OR a locally-synthesized
+    package set, and repeats the set to emulate many opens. Dependency-light on purpose so it
+    runs identically on net48 / net8.0 / net9.0 via `dotnet run -f <tfm>`.
+    Upstreaming note: the scenarios (ScanBenchmarks) are written to drop into
+    benchmark/ICSharpCode.SharpZipLib.Benchmark as BenchmarkDotNet [Benchmark] methods;
+    this Program is the standalone runner used for local measurement.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net48;net8.0;net9.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ScanBench</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ICSharpCode.SharpZipLib\ICSharpCode.SharpZipLib.csproj" />
+  </ItemGroup>
+
+  <!-- net48 does not auto-reference the compression framework assemblies (used only by the synth path). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+</Project>
