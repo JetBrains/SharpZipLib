@@ -759,6 +759,18 @@ namespace ICSharpCode.SharpZipLib.Zip
 			}
 		}
 
+		/// <summary>
+		/// Gets or sets the <see cref="Compression.IInflaterSource"/> used to decompress Deflated
+		/// entries read from this archive. Defaults to a fresh managed Inflater per read; assign
+		/// <see cref="Compression.PooledInflaterSource.Shared"/> or
+		/// <see cref="Compression.SystemInflaterSource.Default"/> to reduce per-read allocation.
+		/// </summary>
+		public Compression.IInflaterSource InflaterSource
+		{
+			get => _inflaterSource;
+			set => _inflaterSource = value ?? Compression.DefaultInflaterSource.Default;
+		}
+
 		#endregion Properties
 
 		#region Input Handling
@@ -914,7 +926,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 				case CompressionMethod.Deflated:
 					// No need to worry about ownership and closing as underlying stream close does nothing.
-					result = new InflaterInputStream(result, new Inflater(true));
+					result = _inflaterSource.CreateDecompressor(result);
 					break;
 
 				case CompressionMethod.BZip2:
@@ -3825,6 +3837,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private byte[] key;
 		private bool isNewArchive_;
 		private StringCodec _stringCodec = ZipStrings.GetStringCodec();
+
+		private Compression.IInflaterSource _inflaterSource = Compression.DefaultInflaterSource.Default;
 
 		// Default is dynamic which is not backwards compatible and can cause problems
 		// with XP's built in compression which cant read Zip64 archives.
