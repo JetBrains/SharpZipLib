@@ -29,6 +29,7 @@ namespace ScanBench
 		private static int s_fails;                       // ops that threw (must be 0 for a valid run)
 		private static byte[] s_payload;                  // compress scenario: representative input
 		private static long s_compressedLen;              // compress scenario: last output size (ratio)
+		private static byte[] s_smallPayload;             // zoswrite scenario: one small entry body
 
 		private static int Main(string[] args)
 		{
@@ -53,6 +54,14 @@ namespace ScanBench
 				work = Enumerable.Range(0, 25).Select(_ => (Func<Stream>)(() => null)).ToList();
 				op = _ => CompressPayload();
 				Console.WriteLine($"compress payload: {s_payload.Length / 1024.0 / 1024.0:N2} MB representative text");
+			}
+			else if (scenario == "zoswrite")
+			{
+				s_smallPayload = new byte[1024];
+				new Random(7).NextBytes(s_smallPayload);
+				work = Enumerable.Range(0, 200).Select(_ => (Func<Stream>)(() => null)).ToList();
+				op = _ => ZosWrite();
+				Console.WriteLine("zoswrite: 200 ZipOutputStreams/rep, one small entry each");
 			}
 			else
 			{
@@ -196,6 +205,23 @@ namespace ScanBench
 			GC.Collect();
 			GC.WaitForPendingFinalizers();
 			GC.Collect();
+		}
+
+		// "zoswrite": create a ZipOutputStream (default vs pooled Deflater factory) and write one small entry.
+		// Isolates the per-stream Deflater allocation, which pooling eliminates.
+		private static void ZosWrite()
+		{
+			var dest = new CountingStream();
+			ZipOutputStream zos = s_arm == "pooled"
+				? new ZipOutputStream(dest, PooledDeflaterFactory.Shared)
+				: new ZipOutputStream(dest);
+			using (zos)
+			{
+				zos.SetLevel(9);
+				zos.PutNextEntry(new ZipEntry("e.txt"));
+				zos.Write(s_smallPayload, 0, s_smallPayload.Length);
+				zos.CloseEntry();
+			}
 		}
 
 		private static byte[] BuildPayload()
