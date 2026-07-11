@@ -3669,11 +3669,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 					Size = size & 0xffffffffL,
 					CompressedSize = csize & 0xffffffffL,
 					Flags = bitFlags,
-					DosTime = dostime,
 					ZipFileIndex = (long)i,
 					Offset = offset,
 					ExternalFileAttributes = (int)externalAttributes
 				};
+				entry.SetRawDosTime(dostime);
 
 				if (!entry.HasFlag(GeneralBitFlags.Descriptor))
 				{

@@ -646,13 +646,37 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </remarks>
 		public DateTime DateTime
 		{
-			get => dateTime;
+			get
+			{
+				EnsureDateTimeDecoded();
+				return dateTime;
+			}
 
 			set
 			{
+				dosTimePending = false;
 				dateTime = value;
 				known |= Known.Time;
 			}
+		}
+
+		// Lazily decode the DOS timestamp: ReadEntries stores the raw value and defers the (CPU-heavy)
+		// dos->DateTime conversion until DateTime/DosTime is actually read, via the identical path.
+		private void EnsureDateTimeDecoded()
+		{
+			if (dosTimePending)
+			{
+				dosTimePending = false;
+				DosTime = rawDosTime;
+			}
+		}
+
+		// Central-directory scan: record the raw DOS time without decoding it (see EnsureDateTimeDecoded).
+		internal void SetRawDosTime(uint value)
+		{
+			rawDosTime = value;
+			dosTimePending = true;
+			known |= Known.Time;
 		}
 
 		/// <summary>
@@ -1142,6 +1166,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private ushort versionToExtract;                // Version required to extract (library handles <= 2.0)
 		private uint crc;
 		private DateTime dateTime;
+
+		// Deferred DOS-time decoding (see SetRawDosTime / EnsureDateTimeDecoded).
+		private uint rawDosTime;
+		private bool dosTimePending;
 
 		private CompressionMethod method = CompressionMethod.Deflated;
 		private byte[] extra;
