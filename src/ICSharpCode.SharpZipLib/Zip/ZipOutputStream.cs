@@ -91,7 +91,37 @@ namespace ICSharpCode.SharpZipLib.Zip
 			_stringCodec = stringCodec;
 		}
 
+		/// <summary>
+		/// Creates a new Zip output stream that obtains its <see cref="Deflater"/> from the given factory,
+		/// enabling Deflater pooling across many archives (see <see cref="PooledDeflaterFactory"/>). Each
+		/// Deflater carries large window/hash buffers, so pooling sharply cuts per-archive allocation.
+		/// </summary>
+		/// <param name="baseOutputStream">The output stream to which the archive contents are written.</param>
+		/// <param name="deflaterFactory">Factory supplying and reclaiming the Deflater; null uses the default.</param>
+		public ZipOutputStream(Stream baseOutputStream, IDeflaterFactory deflaterFactory)
+			: base(baseOutputStream, (deflaterFactory ?? DefaultDeflaterFactory.Instance).Rent(Deflater.DEFAULT_COMPRESSION, true))
+		{
+			deflaterFactory_ = deflaterFactory ?? DefaultDeflaterFactory.Instance;
+		}
+
+		// Factory that supplied deflater_; on dispose the Deflater is returned to it for reuse.
+		private IDeflaterFactory deflaterFactory_ = DefaultDeflaterFactory.Instance;
+		private bool deflaterReturned_;
+
 		#endregion Constructors
+
+		/// <summary>
+		/// Finishes the stream (via the base implementation), then returns the Deflater to its factory for reuse.
+		/// </summary>
+		protected override void Dispose(bool disposing)
+		{
+			base.Dispose(disposing);
+			if (disposing && !deflaterReturned_)
+			{
+				deflaterReturned_ = true;
+				deflaterFactory_.Return(deflater_);
+			}
+		}
 
 		/// <summary>
 		/// Gets a flag value of true if the central header has been added for this archive; false if it has not been added.

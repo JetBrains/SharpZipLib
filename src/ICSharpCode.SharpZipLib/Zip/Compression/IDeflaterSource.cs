@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 
@@ -156,5 +157,61 @@ namespace ICSharpCode.SharpZipLib.Zip.Compression
 
 			return System.IO.Compression.CompressionLevel.Optimal;
 		}
+	}
+
+	/// <summary>
+	/// Supplies the <see cref="Deflater"/> instance used by <see cref="ICSharpCode.SharpZipLib.Zip.ZipOutputStream"/>
+	/// (which, being a DeflaterOutputStream, needs a Deflater rather than a wrapping stream). Lets callers pool
+	/// Deflaters across many streams — each carries large window/hash buffers, so pooling cuts allocation sharply.
+	/// </summary>
+	public interface IDeflaterFactory
+	{
+		/// <summary>Rents a Deflater configured for the given level (raw / no zlib header for zip).</summary>
+		Deflater Rent(int level, bool noZlibHeaderOrFooter);
+
+		/// <summary>Returns a finished Deflater for reuse (no-op for the default factory).</summary>
+		void Return(Deflater deflater);
+	}
+
+	/// <summary>Default factory: a fresh <see cref="Deflater"/> per stream (historical behaviour).</summary>
+	public sealed class DefaultDeflaterFactory : IDeflaterFactory
+	{
+		/// <summary>Shared stateless instance.</summary>
+		public static readonly IDeflaterFactory Instance = new DefaultDeflaterFactory();
+
+		/// <inheritdoc/>
+		public Deflater Rent(int level, bool noZlibHeaderOrFooter) => new Deflater(level, noZlibHeaderOrFooter);
+
+		/// <inheritdoc/>
+		public void Return(Deflater deflater) { }
+	}
+
+	/// <summary>
+	/// Pools raw (no-zlib-header) <see cref="Deflater"/> instances for zip writing. Thread-safe.
+	/// Assumes the zip case (noZlibHeaderOrFooter = true); the flag is honoured only when creating a new one.
+	/// </summary>
+	public sealed class PooledDeflaterFactory : IDeflaterFactory
+	{
+		/// <summary>Process-wide shared pool.</summary>
+		public static readonly PooledDeflaterFactory Shared = new PooledDeflaterFactory();
+
+		private readonly DeflaterPool pool = new DeflaterPool();
+
+		/// <inheritdoc/>
+		public Deflater Rent(int level, bool noZlibHeaderOrFooter)
+		{
+			// The pool only ever holds raw (no zlib header) deflaters (the zip case). Reset() cannot change
+			// a pooled instance's header mode, so a zlib-framed request could not be honoured — reject it.
+			if (!noZlibHeaderOrFooter)
+			{
+				throw new ArgumentException(
+					"PooledDeflaterFactory only pools raw (no zlib header/footer) deflaters.", nameof(noZlibHeaderOrFooter));
+			}
+
+			return pool.Rent(level);
+		}
+
+		/// <inheritdoc/>
+		public void Return(Deflater deflater) => pool.Return(deflater);
 	}
 }
