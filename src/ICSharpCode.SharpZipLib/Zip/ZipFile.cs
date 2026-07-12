@@ -518,7 +518,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="ArgumentNullException">
 		/// The <see cref="Stream">stream</see> argument is null.
 		/// </exception>
-		public ZipFile(Stream stream, bool leaveOpen, StringCodec stringCodec = null)
+		public ZipFile(Stream stream, bool leaveOpen, StringCodec stringCodec = null, bool useRawEntryNames = false)
 		{
 			if (stream == null)
 			{
@@ -532,6 +532,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			baseStream_ = stream;
 			isStreamOwner = !leaveOpen;
+			useRawNames_ = useRawEntryNames;
 
 			if (stringCodec != null)
 			{
@@ -781,6 +782,30 @@ namespace ICSharpCode.SharpZipLib.Zip
 		{
 			get => _deflaterSource;
 			set => _deflaterSource = value ?? Compression.DefaultDeflaterSource.Default;
+		}
+
+		/// <summary>
+		/// When true, entry names are kept as raw bytes and decoded to <see cref="ZipEntry.Name"/> lazily
+		/// (see <see cref="ZipEntry.NameRaw"/>), for consumers that match/percent-decode names themselves
+		/// (e.g. OPC part scanning). Trades a per-entry byte[] for skipping the decode; leave off (default)
+		/// if you enumerate every Name. Changing it after construction re-reads the central directory.
+		/// </summary>
+		public bool UseRawNames
+		{
+			get => useRawNames_;
+			set
+			{
+				if (useRawNames_ == value)
+				{
+					return;
+				}
+
+				useRawNames_ = value;
+				if (!isNewArchive_)
+				{
+					ReadEntries();
+				}
+			}
 		}
 
 		#endregion Properties
@@ -3660,19 +3685,30 @@ namespace ICSharpCode.SharpZipLib.Zip
 				var entryEncoding = _stringCodec.ZipInputEncoding(bitFlags);
 
 				StreamUtils.ReadFully(baseStream_, buffer, 0, nameLen);
-				string name = entryEncoding.GetString(buffer, 0, nameLen);
 				var unicode = entryEncoding.IsZipUnicode();
 
-				var entry = new ZipEntry(name, versionToExtract, versionMadeBy, (CompressionMethod)method, unicode)
+				// Default: decode the name now. Opt-in UseRawNames keeps the raw bytes and decodes lazily on
+				// first Name access (ZipEntry.NameRaw) — for consumers that match names as raw bytes (e.g. OPC),
+				// trading a per-entry byte[] for skipping the decode; it is slower if every Name is read.
+				ZipEntry entry;
+				if (useRawNames_)
 				{
-					Crc = crc & 0xffffffffL,
-					Size = size & 0xffffffffL,
-					CompressedSize = csize & 0xffffffffL,
-					Flags = bitFlags,
-					ZipFileIndex = (long)i,
-					Offset = offset,
-					ExternalFileAttributes = (int)externalAttributes
-				};
+					var nameBytes = new byte[nameLen];
+					Array.Copy(buffer, 0, nameBytes, 0, nameLen);
+					entry = new ZipEntry(nameBytes, entryEncoding, versionToExtract, versionMadeBy, (CompressionMethod)method, unicode);
+				}
+				else
+				{
+					entry = new ZipEntry(entryEncoding.GetString(buffer, 0, nameLen), versionToExtract, versionMadeBy, (CompressionMethod)method, unicode);
+				}
+
+				entry.Crc = crc & 0xffffffffL;
+				entry.Size = size & 0xffffffffL;
+				entry.CompressedSize = csize & 0xffffffffL;
+				entry.Flags = bitFlags;
+				entry.ZipFileIndex = (long)i;
+				entry.Offset = offset;
+				entry.ExternalFileAttributes = (int)externalAttributes;
 				entry.SetRawDosTime(dostime);
 
 				if (!entry.HasFlag(GeneralBitFlags.Descriptor))
@@ -3879,6 +3915,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 		private Compression.IInflaterSource _inflaterSource = Compression.DefaultInflaterSource.Default;
 
 		private Compression.IDeflaterSource _deflaterSource = Compression.DefaultDeflaterSource.Default;
+
+		private bool useRawNames_;
 
 		// Default is dynamic which is not backwards compatible and can cause problems
 		// with XP's built in compression which cant read Zip64 archives.

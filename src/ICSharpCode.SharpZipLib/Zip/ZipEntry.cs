@@ -221,6 +221,36 @@ namespace ICSharpCode.SharpZipLib.Zip
 			IsUnicodeText = unicode;
 		}
 
+		// Central-directory read: keep the raw name bytes and defer decoding to first Name access
+		// (see EnsureNameDecoded). Enables raw-byte matching via NameRaw without building the string.
+		internal ZipEntry(byte[] rawName, System.Text.Encoding rawNameEncoding, int versionRequiredToExtract,
+			int madeByInfo, CompressionMethod method, bool unicode)
+		{
+			if (rawName == null)
+			{
+				throw new ArgumentNullException(nameof(rawName));
+			}
+
+			if (rawName.Length > 0xffff)
+			{
+				throw new ArgumentException("Name is too long", nameof(rawName));
+			}
+
+			if ((versionRequiredToExtract != 0) && (versionRequiredToExtract < 10))
+			{
+				throw new ArgumentOutOfRangeException(nameof(versionRequiredToExtract));
+			}
+
+			this.DateTime = DateTime.Now;
+			this.nameRaw = rawName;
+			this.nameEncoding = rawNameEncoding;
+			this.versionMadeBy = (ushort)madeByInfo;
+			this.versionToExtract = (ushort)versionRequiredToExtract;
+			this.method = method;
+
+			IsUnicodeText = unicode;
+		}
+
 		/// <summary>
 		/// Creates a deep copy of the given zip entry.
 		/// </summary>
@@ -237,6 +267,8 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 			known = entry.known;
 			name = entry.name;
+			nameRaw = entry.nameRaw;
+			nameEncoding = entry.nameEncoding;
 			size = entry.size;
 			compressedSize = entry.compressedSize;
 			crc = entry.crc;
@@ -690,8 +722,33 @@ namespace ICSharpCode.SharpZipLib.Zip
 		///</remarks>
 		public string Name
 		{
-			get => name;
-			internal set => name = value;
+			get
+			{
+				EnsureNameDecoded();
+				return name;
+			}
+			internal set
+			{
+				name = value;
+				nameRaw = null;
+			}
+		}
+
+		/// <summary>
+		/// The raw, undecoded name bytes exactly as stored in the archive central directory, or null if this
+		/// entry was not read from an archive. Lets callers (e.g. OPC part scanners) match or percent-decode
+		/// names without materialising the <see cref="Name"/> string. The returned array is the entry's own
+		/// buffer &#8212; treat it as read-only.
+		/// </summary>
+		public byte[] NameRaw => nameRaw;
+
+		// Decodes the stored raw name lazily (ReadEntries defers the per-entry GetString to first Name access).
+		private void EnsureNameDecoded()
+		{
+			if (name == null && nameRaw != null)
+			{
+				name = nameEncoding.GetString(nameRaw, 0, nameRaw.Length);
+			}
 		}
 
 		/// <summary>
@@ -1059,9 +1116,9 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Currently only dos/windows attributes are tested in this manner.
 		/// The trailing slash convention should always be followed.
 		/// </remarks>
-		public bool IsDirectory 
-			=> name.Length > 0 
-			&& (name[name.Length - 1] == '/' || name[name.Length - 1] == '\\') || HasDosAttributes(16);
+		public bool IsDirectory
+			=> Name.Length > 0
+			&& (Name[Name.Length - 1] == '/' || Name[Name.Length - 1] == '\\') || HasDosAttributes(16);
 
 		/// <summary>
 		/// Get a value of true if the entry appears to be a file; false otherwise
@@ -1104,7 +1161,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// Gets a string representation of this ZipEntry.
 		/// </summary>
 		/// <returns>A readable textual representation of this <see cref="ZipEntry"/></returns>
-		public override string ToString() => name;
+		public override string ToString() => Name;
 
 		/// <summary>
 		/// Test a <see cref="CompressionMethod">compression method</see> to see if this library
@@ -1161,6 +1218,10 @@ namespace ICSharpCode.SharpZipLib.Zip
 														// only relevant for central header entries
 
 		private string name;
+
+		// Deferred name decoding: ReadEntries stores the raw bytes + encoding and decodes on first Name access.
+		private byte[] nameRaw;
+		private System.Text.Encoding nameEncoding;
 		private ulong size;
 		private ulong compressedSize;
 		private ushort versionToExtract;                // Version required to extract (library handles <= 2.0)
