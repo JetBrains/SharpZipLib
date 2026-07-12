@@ -24,6 +24,7 @@ namespace ScanBench
 	internal static class Program
 	{
 		private static string s_arm = "sharpzip";        // sharpzip | pooled | system
+		private static bool s_rawMatch;                   // nuspec: match on NameRaw (no string decode)
 		[ThreadStatic] private static byte[] s_readBuf;   // reused so the read buffer is not counted per-open
 		private static long s_bytes;                      // total bytes actually (de)compressed (correctness check)
 		private static int s_fails;                       // ops that threw (must be 0 for a valid run)
@@ -38,6 +39,7 @@ namespace ScanBench
 			int reps = int.Parse(GetOpt(args, "--reps", "12"));
 			string scenario = GetOpt(args, "--scenario", "open");
 			s_arm = GetOpt(args, "--arm", "sharpzip");
+			s_rawMatch = Array.IndexOf(args, "--rawmatch") >= 0;
 			bool inmem = Array.IndexOf(args, "--inmem") >= 0;
 			int budgetMB = int.Parse(GetOpt(args, "--budgetMB", "1500"));
 			int maxFileMB = int.Parse(GetOpt(args, "--maxFileMB", "64"));
@@ -138,14 +140,17 @@ namespace ScanBench
 		// "open": scan the central directory only, touch each entry name. No decompression.
 		private static void ScanOpen(Func<Stream> openStream)
 		{
-			using (var zf = new ZipFile(openStream()))
-				foreach (ZipEntry e in zf) { var _ = e.Name; }
+			using (var zf = OpenZip(openStream))
+				if (s_rawMatch)
+					foreach (ZipEntry e in zf) { var _ = e.NameRaw; }   // touch raw bytes, no decode
+				else
+					foreach (ZipEntry e in zf) { var _ = e.Name; }      // decode every name
 		}
 
 		// "nuspec": open + locate the root .nuspec + fully read it (one inflate) via the selected arm.
 		private static void ReadNuspec(Func<Stream> openStream)
 		{
-			using (var zf = new ZipFile(openStream()))
+			using (var zf = OpenZip(openStream))
 			{
 				switch (s_arm)
 				{
@@ -154,7 +159,10 @@ namespace ScanBench
 				}
 				foreach (ZipEntry e in zf)
 				{
-					if (e.IsFile && e.Name.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) && !e.Name.Contains("/"))
+					bool match = s_rawMatch
+						? IsRootNuspecRaw(e.NameRaw)                                  // no string decode
+						: (e.IsFile && e.Name.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase) && !e.Name.Contains("/"));
+					if (match)
 					{
 						var buf = s_readBuf ?? (s_readBuf = new byte[16 * 1024]);
 						using (var s = zf.GetInputStream(e))
@@ -205,6 +213,30 @@ namespace ScanBench
 			GC.Collect();
 			GC.WaitForPendingFinalizers();
 			GC.Collect();
+		}
+
+		// Constructs the ZipFile once, enabling UseRawNames up-front (avoids a second central-dir read)
+		// so the raw-match arm reflects true skip-decode behaviour.
+		private static ZipFile OpenZip(Func<Stream> openStream)
+			=> new ZipFile(openStream(), leaveOpen: false, stringCodec: null, useRawEntryNames: s_rawMatch);
+
+		// Raw-byte match for a root-level *.nuspec (case-insensitive ASCII) without decoding the Name string.
+		private static bool IsRootNuspecRaw(byte[] raw)
+		{
+			const string suffix = ".nuspec";
+			if (raw == null || raw.Length < suffix.Length) return false;
+			for (int i = 0; i < raw.Length; i++)
+			{
+				if (raw[i] == (byte)'/') return false;   // root-level only
+			}
+			int off = raw.Length - suffix.Length;
+			for (int i = 0; i < suffix.Length; i++)
+			{
+				byte c = raw[off + i];
+				if (c >= 'A' && c <= 'Z') c = (byte)(c + 32);   // ASCII to lower
+				if (c != suffix[i]) return false;
+			}
+			return true;
 		}
 
 		// "zoswrite": create a ZipOutputStream (default vs pooled Deflater factory) and write one small entry.
