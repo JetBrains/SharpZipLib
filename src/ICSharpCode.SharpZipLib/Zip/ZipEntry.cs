@@ -742,6 +742,12 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </summary>
 		public byte[] NameRaw => nameRaw;
 
+		/// <summary>
+		/// (JetBrains) Alias of <see cref="NameRaw"/>, preserved for existing OPC consumers: the entry name in
+		/// the raw ZIP-directory bytes, to decode against special rules (OPC Part URI/IRI). Null if unavailable.
+		/// </summary>
+		public byte[] TryGetNameBytes() => NameRaw;
+
 		// Decodes the stored raw name lazily (ReadEntries defers the per-entry GetString to first Name access).
 		private void EnsureNameDecoded()
 		{
