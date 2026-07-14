@@ -773,12 +773,12 @@ namespace ICSharpCode.SharpZipLib.Tar
 				return;
 			}
 
-			// Assume we are working with relative symlinks in the archive
-			var linkFile = Path.Combine(Path.GetDirectoryName(destFile) ?? destFile, linkName);
-			var symlinkCreationResult = Interop.symlink(linkFile, destFile);
+			// Write the link target verbatim (typically relative), matching native tar tools, so the
+			// extracted tree stays relocatable — do not resolve it against the extraction directory.
+			var symlinkCreationResult = Interop.symlink(linkName, destFile);
 			if (symlinkCreationResult == -1)
 			{
-				var message = $"Can not create symlink \"{destFile}\" -> \"{linkFile}\"";
+				var message = $"Can not create symlink \"{destFile}\" -> \"{linkName}\"";
 				OnProgressMessageEvent(entry, message);
 			}
 		}
