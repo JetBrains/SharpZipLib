@@ -23,6 +23,23 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 		[TearDown]
 		public void Deinit() => Trace.Listeners.Remove(Listener);
 
+		[Test]
+		[Category("Zip")]
+		public void SetCommentNullIsTreatedAsEmpty()
+		{
+			// A null archive comment means "no comment" and must not throw. Regression: upstream's StringCodec refactor
+			// dropped the null tolerance that ZipStrings.ConvertToArray had (it returned an empty array for null),
+			// turning SetComment(null) into an NPE from Encoding.GetBytes(null).
+			using var ms = new MemoryStream();
+			using (var outStream = new ZipOutputStream(ms) { IsStreamOwner = false })
+			{
+				Assert.DoesNotThrow(() => outStream.SetComment(null));
+				outStream.PutNextEntry(new ZipEntry("entry.txt"));
+				outStream.Write(new byte[10], 0, 10);
+			}
+			Assert.That(ms.ToArray(), Does.PassTestArchive());
+		}
+
 		private void MustFailRead(Stream s, byte[] buffer, int offset, int count)
 		{
 			bool exception = false;

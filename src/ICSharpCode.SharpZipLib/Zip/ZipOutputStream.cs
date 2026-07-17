@@ -146,7 +146,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// </exception>
 		public void SetComment(string comment)
 		{
-			byte[] commentBytes = _stringCodec.ZipArchiveCommentEncoding.GetBytes(comment);
+			byte[] commentBytes = _stringCodec.ZipArchiveCommentEncoding.GetBytes(comment ?? string.Empty); // a null comment means "no comment"; upstream's StringCodec refactor dropped the null tolerance that ZipStrings.ConvertToArray had (it returned an empty array for null)
 			if (commentBytes.Length > 0xffff)
 			{
 				throw new ArgumentOutOfRangeException(nameof(comment));
