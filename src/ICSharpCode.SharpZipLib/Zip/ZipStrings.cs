@@ -209,7 +209,15 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <summary>
 		/// The system default encoding.
 		/// </summary>
-		public static Encoding SystemDefaultEncoding => Encoding.GetEncoding(0);
+		// Encoding.GetEncoding(0) resolves the OS ANSI codepage. Via the CodePagesEncodingProvider on non-Windows that P/Invokes kernel32!GetCPInfoExW and throws DllNotFoundException (there is no OS ANSI codepage there). Fall back to UTF-8 - matching .NET's own Encoding.Default on non-Windows - rather than crash; a working provider (including a test one) is still honored on every platform.
+		public static Encoding SystemDefaultEncoding
+		{
+			get
+			{
+				try { return Encoding.GetEncoding(0); }
+				catch (DllNotFoundException) { return Encoding.UTF8; }
+			}
+		}
 
 		/// <summary>
 		/// The encoding used for the zip archive comment. Defaults to the encoding for <see cref="CodePage"/>, since
