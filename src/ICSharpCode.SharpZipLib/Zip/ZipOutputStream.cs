@@ -973,11 +973,11 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		/// <summary>
 		/// Flushes the stream by calling <see cref="DeflaterOutputStream.Flush">Flush</see> on the deflater stream unless
-		/// the current compression method is <see cref="CompressionMethod.Stored"/>. Then it flushes the underlying output stream.
+		/// the current compression method is <see cref="CompressionMethod.Stored"/> or the entry is a passthrough entry — in both cases the deflater holds no data for the current entry, so flushing it would emit a spurious sync-flush marker into the archive. Then it flushes the underlying output stream.
 		/// </summary>
 		public override void Flush()
 		{
-			if(curMethod == CompressionMethod.Stored)
+			if(curMethod == CompressionMethod.Stored || entryIsPassthrough)
 			{
 				baseOutputStream_.Flush();
 			} 

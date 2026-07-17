@@ -38,6 +38,38 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 			Assert.That(ms.ToArray(), Does.PassTestArchive());
 		}
 
+		[Test]
+		[Category("Zip")]
+		public void FlushingDuringPassthroughEntryDoesNotCorruptArchive()
+		{
+			using var ms = new MemoryStream();
+
+			using (var outStream = new ZipOutputStream(ms){IsStreamOwner = false})
+			{
+				for (int i = 0; i < 3; i++)
+				{
+					var (compressedData, crc, size) = CreateDeflatedData();
+					var entry = new ZipEntry($"dummyfile{i}.tst")
+					{
+						CompressionMethod = CompressionMethod.Deflated,
+						Size = size,
+						Crc = (uint)crc.Value,
+						CompressedSize = compressedData.Length,
+					};
+
+					outStream.PutNextPassthroughEntry(entry);
+					compressedData.CopyTo(outStream);
+
+					// A passthrough entry does not feed the deflater, so flushing here must not run it:
+					// otherwise Flush() emits a sync-flush marker straight to the base stream, uncounted,
+					// shifting every subsequent local header (and the central directory) and corrupting the archive.
+					outStream.Flush();
+				}
+			}
+
+			Assert.That(ms.ToArray(), Does.PassTestArchive());
+		}
+
 		private static (MemoryStream, Crc32, int) CreateDeflatedData()
 		{
 			var data = Encoding.UTF8.GetBytes("Hello, world");
