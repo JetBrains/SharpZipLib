@@ -40,6 +40,17 @@ namespace ICSharpCode.SharpZipLib.Tests.Zip
 			Assert.That(ms.ToArray(), Does.PassTestArchive());
 		}
 
+		[Test]
+		[Category("Zip")]
+		public void ZipFileLegacyCtorAritiesArePreserved()
+		{
+			// 1.3.x shipped ctor(String) and ctor(Stream, Boolean). 1.4.x turned them into optional-parameter ctors,
+			// which changes the emitted method arity - a binary break for pre-compiled callers (e.g. Monodoc's
+			// new ZipFile(string), which threw MissingMethodException). These arities must remain as real methods.
+			Assert.That(typeof(ZipFile).GetConstructor(new[] { typeof(string) }), Is.Not.Null, "ZipFile(string) ctor arity must exist");
+			Assert.That(typeof(ZipFile).GetConstructor(new[] { typeof(Stream), typeof(bool) }), Is.Not.Null, "ZipFile(Stream, bool) ctor arity must exist");
+		}
+
 		private void MustFailRead(Stream s, byte[] buffer, int offset, int count)
 		{
 			bool exception = false;

@@ -399,7 +399,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="ZipException">
 		/// The file doesn't contain a valid zip archive.
 		/// </exception>
-		public ZipFile(string name, StringCodec stringCodec = null)
+		public ZipFile(string name, StringCodec stringCodec)
 		{
 			name_ = name ?? throw new ArgumentNullException(nameof(name));
 
@@ -500,6 +500,19 @@ namespace ICSharpCode.SharpZipLib.Zip
 
 		}
 
+		// Binary-compatibility overloads. 1.3.x shipped ctor(String) and ctor(Stream, Boolean); 1.4.x turned those into optional-parameter ctors (..., StringCodec = null [, useRawEntryNames = false]). Optional parameters are a compile-time feature, so the emitted method arity changed and pre-compiled callers of the old arities (e.g. Monodoc's new ZipFile(string)) fail with MissingMethodException. Keep the old arities as real overloads forwarding to the codec-aware ctors.
+		/// <inheritdoc cref="ZipFile(string, StringCodec)" />
+		public ZipFile(string name)
+			: this(name, null)
+		{
+		}
+
+		/// <inheritdoc cref="ZipFile(Stream, bool, StringCodec, bool)" />
+		public ZipFile(Stream stream, bool leaveOpen)
+			: this(stream, leaveOpen, null, false)
+		{
+		}
+
 		/// <summary>
 		/// Opens a Zip file reading the given <see cref="Stream"/>.
 		/// </summary>
@@ -518,7 +531,7 @@ namespace ICSharpCode.SharpZipLib.Zip
 		/// <exception cref="ArgumentNullException">
 		/// The <see cref="Stream">stream</see> argument is null.
 		/// </exception>
-		public ZipFile(Stream stream, bool leaveOpen, StringCodec stringCodec = null, bool useRawEntryNames = false)
+		public ZipFile(Stream stream, bool leaveOpen, StringCodec stringCodec, bool useRawEntryNames = false)
 		{
 			if (stream == null)
 			{
