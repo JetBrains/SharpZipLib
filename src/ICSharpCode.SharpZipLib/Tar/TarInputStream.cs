@@ -570,101 +570,114 @@ namespace ICSharpCode.SharpZipLib.Tar
 				try
 				{
 					var header = new TarHeader();
-					header.ParseBuffer(headerBuf, encoding);
-					if (!header.IsChecksumValid)
-					{
-						throw new TarException("Header checksum is invalid");
-					}
-
-					this.entryOffset = 0;
-					this.entrySize = header.Size;
-
 					string longName = null;
+					string longLink = null;
 
-					if (header.TypeFlag == TarHeader.LF_GNU_LONGNAME)
+					// A single logical entry may be preceded by several metadata headers - e.g. GNU emits a
+					// LONGLINK ('K') immediately followed by a LONGNAME ('L') when an entry's link target and
+					// name both exceed 100 bytes, and PAX uses 'x'/'g' headers. Consume every metadata header
+					// in a loop, carrying the long name/link forward, until the real entry header is reached.
+					// Handling only one per call would surface the next one as a bogus '././@LongLink' entry,
+					// which then gets counted and extracted as a stray file.
+					while (true)
 					{
-						using (var nameBuffer = ExactMemoryPool<byte>.Shared.Rent(TarBuffer.BlockSize))
+						header.ParseBuffer(headerBuf, encoding);
+						if (!header.IsChecksumValid)
 						{
+							throw new TarException("Header checksum is invalid");
+						}
+
+						this.entryOffset = 0;
+						this.entrySize = header.Size;
+
+						if (header.TypeFlag == TarHeader.LF_GNU_LONGNAME || header.TypeFlag == TarHeader.LF_GNU_LONGLINK)
+						{
+							using (var nameBuffer = ExactMemoryPool<byte>.Shared.Rent(TarBuffer.BlockSize))
+							{
+								long numToRead = this.entrySize;
+
+								var longNameBuilder = StringBuilderPool.Instance.Rent();
+
+								while (numToRead > 0)
+								{
+									var length = (numToRead > TarBuffer.BlockSize ? TarBuffer.BlockSize : (int)numToRead);
+									int numRead = await ReadAsync(nameBuffer.Memory.Slice(0, length), ct, isAsync).ConfigureAwait(false);
+
+									if (numRead == -1)
+									{
+										throw new InvalidHeaderException("Failed to read long name entry");
+									}
+
+									longNameBuilder.Append(TarHeader.ParseName(nameBuffer.Memory.Slice(0, numRead).Span,
+										encoding));
+									numToRead -= numRead;
+								}
+
+								if (header.TypeFlag == TarHeader.LF_GNU_LONGLINK)
+								{
+									longLink = longNameBuilder.ToString();
+								}
+								else
+								{
+									longName = longNameBuilder.ToString();
+								}
+
+								StringBuilderPool.Instance.Return(longNameBuilder);
+							}
+						}
+						else if (header.TypeFlag == TarHeader.LF_XHDR)
+						{
+							// POSIX extended header
+							byte[] nameBuffer = ArrayPool<byte>.Shared.Rent(TarBuffer.BlockSize);
 							long numToRead = this.entrySize;
 
-							var longNameBuilder = StringBuilderPool.Instance.Rent();
+							var xhr = new TarExtendedHeaderReader();
 
 							while (numToRead > 0)
 							{
-								var length = (numToRead > TarBuffer.BlockSize ? TarBuffer.BlockSize : (int)numToRead);
-								int numRead = await ReadAsync(nameBuffer.Memory.Slice(0, length), ct, isAsync).ConfigureAwait(false);
+								var length = (numToRead > nameBuffer.Length ? nameBuffer.Length : (int)numToRead);
+								int numRead = await ReadAsync(nameBuffer.AsMemory().Slice(0, length), ct, isAsync).ConfigureAwait(false);
 
 								if (numRead == -1)
 								{
 									throw new InvalidHeaderException("Failed to read long name entry");
 								}
 
-								longNameBuilder.Append(TarHeader.ParseName(nameBuffer.Memory.Slice(0, numRead).Span,
-									encoding));
+								xhr.Read(nameBuffer, numRead);
 								numToRead -= numRead;
 							}
 
-							longName = longNameBuilder.ToString();
-							StringBuilderPool.Instance.Return(longNameBuilder);
+							ArrayPool<byte>.Shared.Return(nameBuffer);
 
-							await SkipToNextEntryAsync(ct, isAsync).ConfigureAwait(false);
-							await this.tarBuffer.ReadBlockIntAsync(headerBuf, ct, isAsync).ConfigureAwait(false);
-						}
-					}
-					else if (header.TypeFlag == TarHeader.LF_GHDR)
-					{
-						// POSIX global extended header
-						// Ignore things we dont understand completely for now
-						await SkipToNextEntryAsync(ct, isAsync).ConfigureAwait(false);
-						await this.tarBuffer.ReadBlockIntAsync(headerBuf, ct, isAsync).ConfigureAwait(false);
-					}
-					else if (header.TypeFlag == TarHeader.LF_XHDR)
-					{
-						// POSIX extended header
-						byte[] nameBuffer = ArrayPool<byte>.Shared.Rent(TarBuffer.BlockSize);
-						long numToRead = this.entrySize;
-
-						var xhr = new TarExtendedHeaderReader();
-
-						while (numToRead > 0)
-						{
-							var length = (numToRead > nameBuffer.Length ? nameBuffer.Length : (int)numToRead);
-							int numRead = await ReadAsync(nameBuffer.AsMemory().Slice(0, length), ct, isAsync).ConfigureAwait(false);
-
-							if (numRead == -1)
+							if (xhr.Headers.TryGetValue("path", out string name))
 							{
-								throw new InvalidHeaderException("Failed to read long name entry");
+								longName = name;
 							}
 
-							xhr.Read(nameBuffer, numRead);
-							numToRead -= numRead;
+							if (xhr.Headers.TryGetValue("linkpath", out string linkName))
+							{
+								longLink = linkName;
+							}
 						}
-
-						ArrayPool<byte>.Shared.Return(nameBuffer);
-
-						if (xhr.Headers.TryGetValue("path", out string name))
+						else if (header.TypeFlag == TarHeader.LF_GHDR ||
+						         header.TypeFlag == TarHeader.LF_GNU_VOLHDR ||
+						         (header.TypeFlag != TarHeader.LF_NORMAL &&
+						          header.TypeFlag != TarHeader.LF_OLDNORM &&
+						          header.TypeFlag != TarHeader.LF_LINK &&
+						          header.TypeFlag != TarHeader.LF_SYMLINK &&
+						          header.TypeFlag != TarHeader.LF_DIR))
 						{
-							longName = name;
+							// POSIX global extended header, GNU volume header, or any other metadata header we
+							// don't interpret. Skip its body; it is not a real entry.
+						}
+						else
+						{
+							// A real entry header - stop consuming metadata.
+							break;
 						}
 
 						await SkipToNextEntryAsync(ct, isAsync).ConfigureAwait(false);
 						await this.tarBuffer.ReadBlockIntAsync(headerBuf, ct, isAsync).ConfigureAwait(false);
-					}
-					else if (header.TypeFlag == TarHeader.LF_GNU_VOLHDR)
-					{
-						// TODO: could show volume name when verbose
-						await SkipToNextEntryAsync(ct, isAsync).ConfigureAwait(false);
-						await this.tarBuffer.ReadBlockIntAsync(headerBuf, ct, isAsync).ConfigureAwait(false);
-					}
-					else if (header.TypeFlag != TarHeader.LF_NORMAL &&
-					         header.TypeFlag != TarHeader.LF_OLDNORM &&
-					         header.TypeFlag != TarHeader.LF_LINK &&
-					         header.TypeFlag != TarHeader.LF_SYMLINK &&
-					         header.TypeFlag != TarHeader.LF_DIR)
-					{
-						// Ignore things we dont understand completely for now
-						await SkipToNextEntryAsync(ct, isAsync).ConfigureAwait(false);
-						await tarBuffer.ReadBlockIntAsync(headerBuf, ct, isAsync).ConfigureAwait(false);
 					}
 
 					if (entryFactory == null)
@@ -675,6 +688,11 @@ namespace ICSharpCode.SharpZipLib.Tar
 						if (longName != null)
 						{
 							currentEntry.Name = longName;
+						}
+
+						if (longLink != null)
+						{
+							currentEntry.TarHeader.LinkName = longLink;
 						}
 					}
 					else
