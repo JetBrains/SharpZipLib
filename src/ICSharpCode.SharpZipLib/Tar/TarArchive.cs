@@ -646,7 +646,12 @@ namespace ICSharpCode.SharpZipLib.Tar
 		/// <param name="allowParentTraversal">Allow parent directory traversal in file paths (e.g. ../file)</param>
 		private void ExtractEntry(string destDir, TarEntry entry, bool allowParentTraversal)
 		{
-			OnProgressMessageEvent(entry, null);
+			// Symlinks defer their "extracted" (null-message) event to ExtractSymlink, which raises it only on
+			// success, so an entry that cannot be created never produces the null event consumers treat as a
+			// completed extraction. This mirrors how LF_LINK is reported (a single message, in ExtractContents)
+			// and preserves the contract "one terminal event per entry: null iff the entry was extracted".
+			if (entry.TarHeader.TypeFlag != TarHeader.LF_SYMLINK)
+				OnProgressMessageEvent(entry, null);
 
 			string name = entry.Name;
 
@@ -780,6 +785,11 @@ namespace ICSharpCode.SharpZipLib.Tar
 			{
 				var message = $"Can not create symlink \"{destFile}\" -> \"{linkName}\"";
 				OnProgressMessageEvent(entry, message);
+			}
+			else
+			{
+				// Terminal "extracted" event, raised only after the symlink was actually created.
+				OnProgressMessageEvent(entry, null);
 			}
 		}
 

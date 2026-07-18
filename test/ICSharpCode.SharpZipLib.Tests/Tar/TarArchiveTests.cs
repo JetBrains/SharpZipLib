@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using ICSharpCode.SharpZipLib.Core;
 using ICSharpCode.SharpZipLib.Tar;
@@ -86,6 +87,58 @@ namespace ICSharpCode.SharpZipLib.Tests.Tar
 			}
 
 			Assert.That(File.Exists(expectedOutputFile));
+		}
+
+		[Test]
+		[Category("Tar")]
+		[Category("CreatesTempFile")]
+		public void ExtractedEventIsRaisedOnlyForEntriesThatWereActuallyExtracted()
+		{
+			// A symlink entry that cannot be created (for example on Windows) must NOT raise the null-message
+			// "extracted" event, otherwise consumers that read a null message as a successful extraction (such as
+			// a file-count check) over-count entries that never reached disk. Contract: one terminal event per
+			// entry, and a null message iff the entry now exists on disk.
+			var fileContent = Encoding.UTF8.GetBytes("file content");
+			using var tempDir = GetTempDir();
+			var extractPath = tempDir.FullName;
+
+			using var archiveStream = new MemoryStream();
+			using (var tos = new TarOutputStream(archiveStream, Encoding.UTF8) { IsStreamOwner = false })
+			{
+				var fileEntry = TarEntry.CreateTarEntry("realfile");
+				fileEntry.Size = fileContent.Length;
+				tos.PutNextEntry(fileEntry);
+				tos.Write(fileContent, 0, fileContent.Length);
+				tos.CloseEntry();
+
+				var linkEntry = TarEntry.CreateTarEntry("link");
+				linkEntry.TarHeader.TypeFlag = TarHeader.LF_SYMLINK;
+				linkEntry.TarHeader.LinkName = "realfile";
+				linkEntry.Size = 0;
+				tos.PutNextEntry(linkEntry);
+				tos.CloseEntry();
+			}
+
+			archiveStream.Position = 0;
+
+			var extractedEntries = new List<string>();
+			using (var ta = TarArchive.CreateInputTarArchive(archiveStream, Encoding.UTF8))
+			{
+				ta.ProgressMessageEvent += (archive, entry, message) =>
+				{
+					if (message == null && !entry.IsDirectory)
+						extractedEntries.Add(entry.Name);
+				};
+				ta.ExtractContents(extractPath);
+			}
+
+			// Every entry reported as extracted (null message) must actually be present on disk.
+			foreach (var name in extractedEntries)
+				Assert.That(File.Exists(Path.Combine(extractPath, name)), Is.True,
+					$"Entry '{name}' raised the extracted event but is not present on disk");
+
+			// The regular file is always extractable, so it must be reported.
+			Assert.That(extractedEntries, NUnit.Framework.Does.Contain("realfile"));
 		}
 	}
 }
