@@ -39,7 +39,8 @@ Please see https://github.com/icsharpcode/SharpZipLib/wiki/Release-1.4.2 for mor
 
 	<ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
 		<PackageReference Include="System.Memory" Version="4.5.4" />
-		<PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.2" />
+		<!-- 4.5.4 (asm 4.2.0.1) matches the version Platform ships, so NetFX consumers need no extra binding redirect. -->
+		<PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4" />
 	</ItemGroup>
 
 	<ItemGroup>
