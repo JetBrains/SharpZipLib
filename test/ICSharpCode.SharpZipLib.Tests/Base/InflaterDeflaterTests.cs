@@ -364,5 +364,48 @@ namespace ICSharpCode.SharpZipLib.Tests.Base
 
 			File.Delete(tempFile);
 		}
+
+		/// <summary>
+		/// Characterizes deflate flush semantics: an intermediate <see cref="DeflaterOutputStream.Flush"/> (a zlib SYNC_FLUSH)
+		/// is NOT byte-invariant. It closes the current deflate block early and emits a sync boundary, so the stream stays valid
+		/// and round-trips, but it is a few bytes larger and byte-different from the un-flushed stream. This is by design
+		/// (matching zlib / System.IO.Compression / java.util.zip), not a library bug: a caller that needs reproducible bytes
+		/// must not flush a live deflater mid-stream. Regression anchor for JetBrains RSRP-504163.
+		/// </summary>
+		[Test]
+		[Category("Base")]
+		public void DeflaterFlushIsNotByteInvariantButStillRoundTrips([Values(6, 9)] int level)
+		{
+			byte[] original = Utils.GetDummyBytes(128 * 1024, RandomSeed);
+
+			byte[] noFlush = DeflateRaw(original, level, intermediateFlush: false);
+			byte[] withFlush = DeflateRaw(original, level, intermediateFlush: true);
+
+			// Both must decompress back to the exact original: flushing never corrupts the stream.
+			Inflate(new MemoryStream(noFlush), original, level, zlib: false);
+			Inflate(new MemoryStream(withFlush), original, level, zlib: false);
+
+			Assert.That(withFlush, Is.Not.EqualTo(noFlush), "A mid-stream SYNC_FLUSH was unexpectedly byte-invariant.");
+			Assert.That(withFlush.Length, Is.GreaterThan(noFlush.Length), "The SYNC_FLUSH boundary should add bytes.");
+		}
+
+		/// <summary>
+		/// Raw-deflates <paramref name="data"/> at the given <paramref name="level"/> (no zlib header/footer), optionally
+		/// performing a single <see cref="DeflaterOutputStream.Flush"/> after all data is written and before <c>Finish</c>.
+		/// </summary>
+		private static byte[] DeflateRaw(byte[] data, int level, bool intermediateFlush)
+		{
+			var memoryStream = new MemoryStream();
+			using (var outStream = new DeflaterOutputStream(memoryStream, new Deflater(level, true)) { IsStreamOwner = false })
+			{
+				outStream.Write(data, 0, data.Length);
+				if (intermediateFlush)
+				{
+					outStream.Flush();
+				}
+				outStream.Finish();
+			}
+			return memoryStream.ToArray();
+		}
 	}
 }
